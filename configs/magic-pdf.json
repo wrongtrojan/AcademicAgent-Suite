@@ -1,0 +1,17 @@
+{
+    "models-dir": "/home/liangqing/AcademicAgent-Suite/models/miner_u/models",
+    "device-mode": "cuda",
+    "temp-output-dir": "/home/liangqing/AcademicAgent-Suite/storage/processed",
+    "layout-config": {
+        "model": "layoutlmv3"
+    },
+    "formula-config": {
+        "mfd_model": "yolo_v8_mfd", 
+        "mfr_model": "unimernet_small",
+        "enable": true
+    },
+    "table-config": {
+        "model": "structeqtable",
+        "enable": false
+    }
+}
