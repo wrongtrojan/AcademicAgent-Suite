@@ -28,7 +28,7 @@ trap 'rm -f "$HOME_CONFIG"; echo "[Status] Cleanup: Removed $HOME_CONFIG from ho
 
 # 4. 从 model_config.yaml 读取路径 [cite: 79]
 CONFIG_YAML="$PROJECT_ROOT/configs/model_config.yaml"
-RAW_DIR=$(yq e '.paths.raw_storage' "$CONFIG_YAML")
+RAW_DIR=$(yq e '.paths.raw_storage' "$CONFIG_YAML")/PDF
 PROCESSED_DIR=$(yq e '.paths.processed_storage' "$CONFIG_YAML")
 CONDA_ENV_PY=$(yq e '.environments.doc_parser' "$CONFIG_YAML")
 MAGIC_PDF_BIN=$(dirname "$CONDA_ENV_PY")/magic-pdf

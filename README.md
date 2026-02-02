@@ -116,20 +116,20 @@
 
 ##### **VideoSemanticSlicer** (视频语义切片工具)
 
-- 定位: 负责视频的视觉特征提取与关键帧定位
-- 核心组件: `OpenCV`, `DINOv2`, `CLIP`
+- 定位: 负责视频关键帧定位
+- 核心组件: `OpenCV`
 - 跨项目复用: 视频检索、自动剪辑、长视频监控摘要
 
 ##### **AudioTranscriptionExpert** (语音转写专家)
 
-- 定位: 专注于高质量音频转文本及说话人识别
-- 核心组件: Whisper-v3, Pyannote.audio
+- 定位: 负责音频转文本及说话人识别
+- 核心组件: `Whisper-v3`, `Pyannote.audio`
 - 跨项目复用: 会议记录自动生成、播客内容索引、多语言翻译
 
 ##### **VisualReasoningEye** (多模态视觉推理工具)
 
 - 定位: 解析复杂图表、手写公式和视频关键帧语义
-- 核心组件: `Qwen2-VL`, `Transformers`, `CLIP`
+- 核心组件: `Qwen2-VL`, `Transformers`, `DINOv2`
 - 跨项目复用: 图像问答、工业质检场景、自动化GUI测试
 
 ##### **ScientificSandbox** (科学计算与验证沙盒)
@@ -141,7 +141,7 @@
 ##### **DataStreamOrchestrator** (数据调度工具)
 跨项目复用: 所有基于大模型的复杂多步骤任务流程控制
 - 定位: 负责将解析后的Markdown、视频元数据和向量Embedding写入数据库,并提供检索服务
-- 核心组件: `pymilvus`, `redis-py`, `sqlalchemy`
+- 核心组件: `pymilvus`, `redis-py`, `sqlalchemy`, `CLIP`
 - 跨项目复用: 所有涉及向量检索（RAG）和元数据管理的项目
 
 ##### **AgentLogicOrchestrator** (逻辑编排大脑)
@@ -187,13 +187,13 @@ AcademicAgent-Suite/
 │   ├── audio_pro/          # (AudioTranscriptionExpert 运行)
 │   │   └── whisper_node.py
 │   ├── reasoning_eye/      # (VisualReasoningEye 运行)
-│   │   ├── clip_worker.py
 │   │   └── qwen_inference.py
 │   └── sandbox/            # (ScientificSandbox 运行)
 │       └── py_executor.py
 │
 ├── data_layer/             # 数据调度 (DataStreamOrchestrator 运行)
-│   ├── asset_coordinator.py        
+│   ├── asset_coordinator.py    
+│   ├── clip_worker_pdf.py    
 │   ├── milvus_ingestor.py        
 │   ├── vector_db.py        # Milvus 接口
 │   └── storage_client.py   # MinIO 文件上传下载
@@ -366,7 +366,7 @@ conda env create -f 环境名.yml
 - 创建 `services/doc_parser/mineru_worker.sh` 实现 `PDF` 识别,结果存入 `storage/process/magic-pdf/`
 
 2. 文本与图表对齐
-- 创建 `services/reasoning_eye/clip_worker.py` 实现文本和图表向量化,结果存入`storage/process/magic-pdf/文件名/multimodal_features.json`
+- 创建 `data_layer/clip_worker_pdf.py` 实现文本和图表向量化,结果存入`storage/process/magic-pdf/文件名/multimodal_features.json`
 
 3. 数据调度
 - 创建 `configs/milvus_config.yaml` 配置 `Milvus`

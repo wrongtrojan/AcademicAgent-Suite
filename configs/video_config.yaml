@@ -1,0 +1,8 @@
+slicer:
+  frame_diff_threshold: 0.03  # 画面变化超过 12% 判定为关键帧
+  sample_rate: 2             # 每秒采样多少帧进行比对
+  min_interval: 1.0          # 两个关键帧之间的最小间隔（秒）
+
+clip_alignment:
+  batch_size: 32
+  device: "cuda"

@@ -1,4 +1,5 @@
 import os
+import sys  # 补上缺失的导入
 import json
 import yaml
 import torch
@@ -7,6 +8,7 @@ import numpy as np
 from PIL import Image
 import transformers
 from transformers import CLIPProcessor, CLIPModel
+from pathlib import Path
 
 # 日志配置
 logging.basicConfig(
@@ -18,15 +20,24 @@ transformers.utils.logging.set_verbosity_error()
 
 class CLIPWorker:
     def __init__(self, force_reprocess=False):
-        # 1. 加载配置
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, "../../configs/model_config.yaml")
+        # 1. 修正路径逻辑
+        self.current_file_path = Path(__file__).resolve()
+        # 脚本在 AcademicAgent-Suite/data_layer/，向上跳2级到达根目录
+        self.project_root = self.current_file_path.parent.parent
         
+        config_path = self.project_root / "configs" / "model_config.yaml"
+        
+        if not config_path.exists():
+            logger.error(f"找不到配置文件: {config_path}")
+            sys.exit(1)
+
         with open(config_path, 'r', encoding='utf-8') as f:
             self.full_config = yaml.safe_load(f)
         
+        # 从配置中读取路径
         self.model_path = self.full_config['model_paths']['clip']
         self.processed_root = os.path.join(self.full_config['paths']['processed_storage'], "magic-pdf")
+        
         self.force_reprocess = force_reprocess
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
@@ -37,23 +48,20 @@ class CLIPWorker:
     def model(self):
         if self._model is None:
             logger.info(f"--- 开启离线模式，加载 CLIP 权重: {self.model_path} ---")
-            self._model = CLIPModel.from_pretrained(self.model_path).to(self.device)
+            # 确保使用本地路径加载
+            self._model = CLIPModel.from_pretrained(self.model_path, local_files_only=True).to(self.device)
             self._model.eval()
         return self._model
 
     @property
     def processor(self):
         if self._processor is None:
-            self._processor = CLIPProcessor.from_pretrained(self.model_path)
+            self._processor = CLIPProcessor.from_pretrained(self.model_path, local_files_only=True)
         return self._processor
 
     def _get_aligned_embedding(self, outputs):
-        """
-        更加强健的解包逻辑：无论 outputs 是对象、字典还是张量，都强制提取出第一个 Tensor
-        """
+        """保持原有的强健解包逻辑"""
         tensor = None
-        
-        # 1. 尝试直接获取已知的嵌入属性
         if hasattr(outputs, "image_embeds"):
             tensor = outputs.image_embeds
         elif hasattr(outputs, "text_embeds"):
@@ -61,28 +69,22 @@ class CLIPWorker:
         elif hasattr(outputs, "pooler_output"):
             tensor = outputs.pooler_output
             
-        # 2. 如果还是没拿到，尝试作为字典或列表处理
         if tensor is None:
             if isinstance(outputs, (list, tuple)):
                 tensor = outputs[0]
             elif isinstance(outputs, dict):
                 tensor = list(outputs.values())[0]
             elif hasattr(outputs, "last_hidden_state"):
-                # 如果只有隐藏层，我们取平均值
                 tensor = outputs.last_hidden_state.mean(dim=1)
             else:
-                # 最后的兜底：假设它本身就是一个可迭代的对象
                 try:
                     tensor = outputs[0]
                 except:
                     tensor = outputs
 
-        # 3. 现在的 tensor 应该是真正的 PyTorch Tensor 了
-        # 我们进行最后的转换
         if hasattr(tensor, "detach"):
             return tensor.detach().cpu().numpy().flatten().tolist()
         else:
-            # 如果走到这里还不是 tensor，那只能是 numpy 数组或列表了
             return np.array(tensor).flatten().tolist()
 
     def batch_process(self):
@@ -96,18 +98,32 @@ class CLIPWorker:
 
             output_json = os.path.join(doc_path, "multimodal_features.json")
             
+            # --- 增强的增量提示逻辑 ---
             if os.path.exists(output_json) and not self.force_reprocess:
-                logger.info(f"跳过已处理文档: {doc_name}")
+                # 使用特殊的标记 [SKIP]，让你在大量日志中一眼看到
+                logger.info(f"==== [SKIP] 已存在特征文件，跳过处理: {doc_name} ====")
                 continue
 
-            logger.info(f">>> 正在处理文档: {doc_name}")
-            ocr_dir = os.path.join(doc_path, "ocr")
+            logger.info(f">>> [PROCESS] 正在处理新文档: {doc_name}")
+            
+            # 尝试不同的子目录结构
+            found_ocr = False
+            for sub in ["auto", "ocr"]:
+                ocr_dir = os.path.join(doc_path, sub)
+                if os.path.exists(ocr_dir):
+                    found_ocr = True
+                    break
+            
+            if not found_ocr:
+                logger.warning(f"在 {doc_name} 中找不到 auto 或 ocr 目录，跳过")
+                continue
+                
             img_dir = os.path.join(ocr_dir, "images")
             content_list_path = os.path.join(ocr_dir, f"{doc_name}_content_list.json")
 
             doc_results = {"images": {}, "text_chunks": []}
 
-            # 1. 处理图片 (使用投影接口确保维度对齐)
+            # 1. 处理图片
             if os.path.exists(img_dir):
                 images = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
                 for img_name in images:
@@ -115,13 +131,12 @@ class CLIPWorker:
                         image = Image.open(os.path.join(img_dir, img_name)).convert("RGB")
                         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
                         with torch.no_grad():
-                            # get_image_features 会自动通过投影层映射到对齐空间
                             outputs = self.model.get_image_features(**inputs)
                             doc_results["images"][img_name] = self._get_aligned_embedding(outputs)
                     except Exception as e:
                         logger.warning(f"图片 {img_name} 向量化失败: {e}")
 
-            # 2. 处理文本 (使用投影接口确保维度对齐)
+            # 2. 处理文本
             if os.path.exists(content_list_path):
                 try:
                     with open(content_list_path, 'r', encoding='utf-8') as f:
@@ -132,7 +147,6 @@ class CLIPWorker:
 
                         inputs = self.processor(text=[text], return_tensors="pt", padding=True, truncation=True).to(self.device)
                         with torch.no_grad():
-                            # get_text_features 会自动映射到与图片相同的对齐空间
                             outputs = self.model.get_text_features(**inputs)
                             embedding = self._get_aligned_embedding(outputs)
                         
@@ -150,6 +164,5 @@ class CLIPWorker:
             logger.info(f"文档 {doc_name} 特征保存成功")
 
 if __name__ == "__main__":
-    # 强制清理并重跑一次
-    worker = CLIPWorker(force_reprocess=True)
+    worker = CLIPWorker(force_reprocess=False)
     worker.batch_process()
