@@ -86,12 +86,12 @@ class UnifiedIngestor:
             # 执行上传
             self.minio_client.fput_object(self.bucket_name, remote_path, str(p))
             
-            # 构造访问 URL (使用服务器真实 IP)
-            server_ip = "202.114.104.220" # 请确保这是你最新的服务器 IP
-            return f"http://{server_ip}:9000/{self.bucket_name}/{remote_path}"
+            # 针对你“本地看图”的需求：
+            # 只要你做了 SSH 9000 端口转发，Attu 就能通过这个 URL 在浏览器里渲染图片
+            return f"http://127.0.0.1:9000/{self.bucket_name}/{remote_path}" 
             
         except Exception as e:
-            logger.error(f"🔥 MinIO 上传过程中发生异常: {e} | 文件: {p.name}")
+            logger.error(f"🔥 MinIO 上传异常: {e}")
             return None
 
     def _setup_collection(self):

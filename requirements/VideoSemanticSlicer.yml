@@ -1,0 +1,23 @@
+name: VideoSemanticSlicer
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - conda-forge 
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - conda-forge::ffmpeg
+  - opencv
+  - numpy
+  - pip:
+      - torch
+      - torchvision
+      - torchaudio
+      - pydantic
+      - timm
+      - ftfy
+      - regex
+      - tqdm
+      - git+https://github.com/openai/CLIP.git

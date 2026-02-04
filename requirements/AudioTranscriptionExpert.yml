@@ -1,0 +1,19 @@
+name: AudioTranscriptionExpert
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - conda-forge::ffmpeg      
+  - numpy
+  - pip:
+      - torch
+      - torchaudio
+      - faster-whisper         
+      - tqdm                 
+      - av                   
+

@@ -111,7 +111,7 @@
 ##### **DocParserCore** (文档解析工具)
 
 - 定位: 纯粹的非结构化文档处理
-- 核心组件: `MinerU`, `LayoutParser`, `PaddleOCR`
+- 核心组件: `MinerU`
 - 跨项目复用: 将PDF转为标准(带LaTeX公式)Markdown的场景
 
 ##### **VideoSemanticSlicer** (视频语义切片工具)
@@ -147,7 +147,7 @@
 ##### **AgentLogicOrchestrator** (逻辑编排大脑)
 
 - 定位: 负责思维链（CoT）推理、状态机维护和工具调用逻辑
-- 核心组件: `LangGraph`, `DeepSeek-V3-SDK`, `Pydantic`
+- 核心组件: `LangGraph`, `DeepSeek-V3-SDK`
 - 跨项目复用: 所有基于大模型的复杂多步骤任务流程控制
 
 ---
@@ -275,6 +275,79 @@ AcademicAgent-Suite/
 
 ---
 
+### 项目架构图
+
+```mermaid
+graph LR
+    %% 全局样式定义
+    classDef webStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#1565c0
+    classDef coreStyle fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,color:#ef6c00
+    classDef serviceStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#7b1fa2
+    classDef dataStyle fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#c2185b
+    classDef deployStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#2e7d32
+
+    %% 1. 用户交互层
+    subgraph web_env [💻 web - Next.js]
+        UI["学术看板 Dashboard<br/>同屏交互, 动态渲染"]:::webStyle
+    end
+
+    %% 2. 核心调度层
+    subgraph core_env [🧠 AgentLogicOrchestrator]
+        brain["brain.py<br/><b>决策大脑</b>"]:::coreStyle
+        state[LangGraph 状态机]:::coreStyle
+        tools_manager[tools_manager.py 网关]:::coreStyle
+        
+        brain --> state --> tools_manager
+    end
+
+    %% 3. 执行专家库
+    subgraph services_envs [🛠️ services ]
+        DP["DocParserCore<br/><b>文档拆解, 公式还原</b>"]:::serviceStyle
+        VS["VideoSemanticSlicer<br/><b>动态采样, 关键帧定</b>"]:::serviceStyle
+        AE["AudioTranscriptionExpert<br/><b>语音转录, 角色识别</b>"]:::serviceStyle
+        RE["VisualReasoningEye<br/><b>图像解析, 语义提取</b>"]:::serviceStyle
+        SB["ScientificSandbox<br/><b>代码执行, 数理验证</b>"]:::serviceStyle
+    end
+
+    %% 4. 数据调度层
+    subgraph data_env [🔄 DataStreamOrchestrator]
+        DSO["clip_worker / milvus_ingestor<br/><b>异构对齐,数据存储</b>"]:::dataStyle
+    end
+
+    %% 5. 基础设施层
+    subgraph deploy_env [🗄️ deploy - Docker 集群]
+        direction LR
+        Milvus[(Milvus 向量数据库)]:::deployStyle
+        Redis[(Redis 会话快照)]:::deployStyle
+        MinIO[(MinIO 对象存储)]:::deployStyle
+    end
+
+    %% 指令流
+    UI <--> |API| brain
+    tools_manager ==> |分派| DP
+    tools_manager ==> |分派| VS
+    tools_manager ==> |分派| AE
+    tools_manager ==> |分派| RE
+    tools_manager ==> |分派| SB
+    
+    %% 数据生命周期流
+    DP & VS & AE & RE -.-> DSO
+    DSO ==> deploy_env
+    
+    %% 反馈循环
+    deploy_env -.-> |RAG| brain
+    SB -- "物理验证" --> brain
+
+    %% 布局优化
+    style web_env fill:transparent,stroke-dasharray: 5 5
+    style core_env fill:transparent,stroke-dasharray: 5 5
+    style services_envs fill:transparent,stroke-dasharray: 5 5
+    style data_env fill:transparent,stroke-dasharray: 5 5
+    style deploy_env fill:transparent,stroke-dasharray: 5 5
+```
+
+---
+
 ## 项目实现
 
 ### 基础设施与环境搭建
@@ -289,7 +362,7 @@ AcademicAgent-Suite/
 curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
 # 添加清华源
-echo   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 
 # 安装docker及相关工具
@@ -365,18 +438,26 @@ conda env create -f 环境名.yml
 <!-->
 - 创建 `services/doc_parser/mineru_worker.sh` 实现 `PDF` 识别,结果存入 `storage/process/magic-pdf/`
 
-2. 文本与图表对齐
+2. 文本图表向量化
 - 创建 `data_layer/clip_worker_pdf.py` 实现文本和图表向量化,结果存入`storage/process/magic-pdf/文件名/multimodal_features.json`
 
 ##### 视频解析模块
 
----待完成---
+1. 视频语义切片
+- 创建 `configs/video_config.yaml` 配置切片参数
+- 创建 `services/video_vison/video_slicer.py` 实现视频转码/切片(若长期静默画面则按时间切分),结果存入 `storage/process/video/`
+
+2. 音频转文本
+- 创建 `services/audio_pro/whisper_node.py` 实现视频音频句级文本化,结果存入 `storage/processed/video/视频名/transcript.json`
+
+3. 向量化
+- 创建 `data_layer/clip_worker_pdf.py` 实现视频切片与文本对齐后向量化,结果存入 `storage/processed/video/视频名/alignment_metadata.json`
 
 ##### 数据调度模块
 
 1. 数据调度
 - 创建 `configs/milvus_config.yaml` 配置 `Milvus`
-- 创建 `data_layer/milvus_ingestor.py` 将 `multimodal_features.json` 和 `alignment_metadata.json` 存入 `Milvus`
+- 创建 `data_layer/milvus_ingestor.py` 将 `multimodal_features.json` 和 `alignment_metadata.json` 存入 `Milvus`,将图片存入 `minio`
 
 --- 
 

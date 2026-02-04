@@ -21,6 +21,7 @@ model_paths:
   miner_u: "/home/liangqing/AcademicAgent-Suite/models/miner_u"
   clip: "/home/liangqing/AcademicAgent-Suite/models/clip"
   dinov2: "/home/liangqing/AcademicAgent-Suite/models/dinov2/"
+  
 # 数据库连接（Docker 映射）
 database:
   milvus_host: "localhost"
