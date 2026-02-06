@@ -1,0 +1,5 @@
+
+[2026-02-06 06:32:56.722056] --- Sandbox Request Start ---
+Raw Input: {"expression": "x**2-1", "mode": "solve"}
+Execution Result: ['-1', '1']
+[2026-02-06 06:32:56.750034] --- Sandbox Request End ---
