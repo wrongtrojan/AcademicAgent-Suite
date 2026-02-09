@@ -174,23 +174,29 @@ AcademicAgent-Suite/
 │   └── clip/                 
 │
 ├── core/                   # Core Logic (Runs in AgentLogicOrchestrator env)
-│   ├── brain.py            
-│   ├── prompts/            
-│   └── tools_manager.py    
+│   ├── prompts/  
+│   ├── reasoning_stream.py    
+│   ├── ingestion_stream.py 
+│   ├── system_state.py         
+│   └── tools_manager        
 │
 ├── services/               # Environment-specific services scripts
 │   ├── doc_parser/         # (Runs in DocParserCore)
 │   │   ├── miner_worker.sh 
 │   │   └── pdf_wrapper.py 
+│   │ 
 │   ├── video_vision/       # (Runs in VideoSemanticSlicer)
 │   │   ├── video_slicer.py
 │   │   └── video_wrapper.py 
+│   │ 
 │   ├── audio_pro/          # (Runs in AudioTranscriptionExpert)
 │   │   ├── whisper_node.py
 │   │   └── audio_wrapper.py 
+│   │ 
 │   ├── reasoning_eye/      # (Runs in VisualReasoningEye)
 │   │   ├── qwen_inference.py
 │   │   └── visual_wrapper.py 
+│   │ 
 │   └── sandbox/            # (Runs in ScientificSandbox)
 │        ├── executor_logic.py
 │        └── sandbox_wrapper.py 
@@ -198,14 +204,19 @@ AcademicAgent-Suite/
 ├── data_layer/             # Data Scheduling (Runs in DataStreamOrchestrator)
 │   ├── clip_worker_pdf.py    
 │   ├── clip_worker_video.py    
-│   └── milvus_ingestor.py   
+│   ├── milvus_ingestor.py  
+│   ├── data_wrapper.py  
+│   ├── vector_search.py  
+│   └── search_wrapper.py
 │
 ├── logs/                    # Log Center
-│   ├── doc_parser_log.txt         
-│   ├── video_vision_log.txt 
-│   ├── audio_pro_log.txt 
-│   ├── reasoning_eye_log.txt 
-│   └── sandbox_log.txt            
+│   ├── tools_expert.log       
+│   ├── data_layer.log       
+│   ├── doc_parser.log         
+│   ├── video_vision.log
+│   ├── audio_pro.log
+│   ├── reasoning_eye.log 
+│   └── sandbox.log           
 │
 ├── web/                    # Frontend Interaction (Next.js framework)
 │   ├── components/         
@@ -218,7 +229,7 @@ AcademicAgent-Suite/
 │
 └── requirements/           # Dependency manifests for each environment
     ├── DocParserCore.yml
-    └── AgentLogicOrchestrator.yml
+    ├── AgentLogicOrchestrator.yml
     └── ...
 ```
 
@@ -250,6 +261,7 @@ AcademicAgent-Suite/
 ##### **core/** Brain & Decision Center (AgentLogicOrchestrator)
 - **Function**: Responsible for logical reasoning, Chain-of-Thought generation, and cross-environment task dispatching.
 - **Details**: 
+ --- Pending ---
   - brain.py: A state machine built with `LangGraph`, managing the entire process from "understanding questions" to "outputting conclusions."
   - tools_manager.py: The project's "gateway," encapsulating `subprocess` logic to allow the Brain to invoke `Python` scripts in other `Conda` environments and capture their return results without leaving its own environment.
 
@@ -265,6 +277,7 @@ AcademicAgent-Suite/
 ##### **data_layer/** Data Abstraction Layer (DataStreamOrchestrator)
 - **Function**: Responsible for the persistence and retrieval logic of heterogeneous data, acting as the intermediate layer between "business" and "storage".
 - **Details**: 
+ --- Pending ---
   - clip_worker_pdf.py: Handles vectorization and processing for PDF parsing.
   - clip_worker_video.py: Handles vectorization and processing for video parsing.
   - milvus_ingestor.py: Ingests processed data into `Milvus`. 
@@ -286,7 +299,7 @@ AcademicAgent-Suite/
 ---
 
 ### Architecture Diagram
-
+ --- Pending ---
 ```mermaid
 graph LR
     %% Global Style Definitions

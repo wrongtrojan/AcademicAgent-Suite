@@ -11,7 +11,7 @@ def run_slicer(params):
     LOG_DIR = PROJECT_ROOT / "logs"
     LOG_DIR.mkdir(exist_ok=True)
     
-    log_file_path = LOG_DIR / "video_vision_log.txt"
+    log_file_path = LOG_DIR / "video_vision.log"
     logic_script = os.path.join(SCRIPT_DIR, "video_slicer.py")
     python_exe = sys.executable
 

@@ -7,6 +7,7 @@ import logging
 import numpy as np
 from PIL import Image
 import transformers
+import torch.nn.functional as F
 from transformers import CLIPProcessor, CLIPModel
 from pathlib import Path
 
@@ -62,24 +63,24 @@ class CLIPWorker:
             tensor = outputs.text_embeds
         elif hasattr(outputs, "pooler_output"):
             tensor = outputs.pooler_output
-            
+        
         if tensor is None:
-            if isinstance(outputs, (list, tuple)):
-                tensor = outputs[0]
-            elif isinstance(outputs, dict):
-                tensor = list(outputs.values())[0]
-            elif hasattr(outputs, "last_hidden_state"):
+            if hasattr(outputs, "last_hidden_state"):
                 tensor = outputs.last_hidden_state.mean(dim=1)
             else:
-                try:
-                    tensor = outputs[0]
-                except:
-                    tensor = outputs
+                tensor = outputs[0] if isinstance(outputs, (list, tuple)) else outputs
 
         if hasattr(tensor, "detach"):
+            if len(tensor.shape) == 1:
+                tensor = tensor.unsqueeze(0)
+            tensor = F.normalize(tensor, p=2, dim=-1)
             return tensor.detach().cpu().numpy().flatten().tolist()
         else:
-            return np.array(tensor).flatten().tolist()
+            arr = np.array(tensor).flatten()
+            norm = np.linalg.norm(arr)
+            if norm > 1e-6:
+                arr = arr / norm
+            return arr.tolist()
 
     def batch_process(self):
         if not os.path.exists(self.processed_root):

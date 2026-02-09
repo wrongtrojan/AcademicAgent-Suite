@@ -1,15 +1,19 @@
 import numpy as np
 import sympy as sp
 import math
+from sympy.parsing.latex import parse_latex
 
-def run_calculation(expression, mode="eval", symbol="x"):
-    
+def run_calculation(expression: str, mode: str = "eval", symbol: str = "x"):
+    """
+    Enhanced scientific calculation logic supporting symbolic reasoning and numerical analysis.
+    """
+    # 1. Environment Preparation
     if isinstance(__builtins__, dict):
         builtins_dict = __builtins__
     else:
         builtins_dict = vars(__builtins__)
 
-    allowed_builtins = ['abs', 'min', 'max', 'round', 'len', 'sum', 'float', 'int']
+    allowed_builtins = ['abs', 'min', 'max', 'round', 'len', 'sum', 'float', 'int', 'list', 'dict', 'range']
     safe_dict = {
         "np": np, 
         "sp": sp, 
@@ -17,36 +21,41 @@ def run_calculation(expression, mode="eval", symbol="x"):
         "__builtins__": {k: builtins_dict[k] for k in allowed_builtins if k in builtins_dict}
     }
 
-    if mode == "solve":
-        var = sp.symbols(symbol)
-        expr = sp.sympify(expression)
-        solution = sp.solve(expr, var)
-        return [str(s) for s in solution]
-    
-    elif mode == "eval":
-        result = eval(expression, safe_dict)
-        if isinstance(result, (np.ndarray, np.generic)):
-            return result.tolist()
-        return result
-    
-    else:
-        raise ValueError(f"Unsupported modality: {mode}")
-
-if __name__ == "__main__":
     try:
-        import sys
-        import json
+        # 2. Pre-processing: Auto-detect and handle LaTeX if necessary
+        # If expression starts with '\', treat it as LaTeX
+        if expression.strip().startswith('\\'):
+            sympy_expr = parse_latex(expression)
+        else:
+            # Handle potential 'symbol' definition within raw strings
+            sympy_expr = sp.sympify(expression)
 
-        input_json = sys.argv[1] if len(sys.argv) > 1 else "{}"
-        params = json.loads(input_json)
+        # 3. Modality Execution
+        if mode == "solve":
+            # Symbolic Solver
+            var = sp.symbols(symbol)
+            solution = sp.solve(sympy_expr, var)
+            return [sp.latex(s) for s in solution] # Return LaTeX for better AI rendering
         
-        expression = params.get("expression", "")
-        mode = params.get("mode", "eval")
-        symbol = params.get("symbol", "x")
+        elif mode == "simplify":
+            # Symbolic Simplification (Crucial for academic derivation)
+            return sp.latex(sp.simplify(sympy_expr))
+            
+        elif mode == "eval":
+            # Numerical Evaluation or Direct Python Execution
+            # Try evaluating with safe_dict
+            result = eval(expression, safe_dict)
+            
+            # Handle NumPy array serialization
+            if isinstance(result, (np.ndarray, np.generic)):
+                return result.tolist()
+            # Handle SymPy objects
+            if hasattr(result, 'free_symbols'):
+                return sp.latex(result)
+            return result
+        
+        else:
+            raise ValueError(f"Unsupported modality: {mode}")
 
-        result = run_calculation(expression, mode, symbol)
-
-        sys.stdout.write(json.dumps({"status": "success", "result": result}, ensure_ascii=False) + '\n')
-        sys.stdout.flush()
     except Exception as e:
-        print(json.dumps({"status": "error", "message": f"Wrapper entry point crash: {str(e)}"}))
+        raise RuntimeError(f"Calculation Logic Error: {str(e)}")

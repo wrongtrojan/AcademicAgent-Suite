@@ -10,7 +10,7 @@ def run_visual_inference(params):
     LOG_DIR = PROJECT_ROOT / "logs"
     LOG_DIR.mkdir(exist_ok=True)
     
-    log_file_path = LOG_DIR / "resoning_eye_log.txt"
+    log_file_path = LOG_DIR / "resoning_eye.log"
     logic_script = os.path.join(SCRIPT_DIR, "qwen_inference.py")
 
     try:

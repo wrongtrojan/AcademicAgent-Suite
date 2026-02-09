@@ -11,7 +11,7 @@ def run_pdf_expert(params):
     LOG_DIR = PROJECT_ROOT / "logs"
     LOG_DIR.mkdir(exist_ok=True)
     
-    log_file_path = LOG_DIR / "doc_parser_log.txt"
+    log_file_path = LOG_DIR / "doc_parser.log"
     shell_script = os.path.join(SCRIPT_DIR, "mineru_worker.sh")
 
     if not os.path.exists(shell_script):

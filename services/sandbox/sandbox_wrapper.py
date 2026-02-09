@@ -4,22 +4,19 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-# 导入核心逻辑
 try:
     from executor_logic import run_calculation
 except ImportError:
-    # 路径兼容
     sys.path.append(os.path.dirname(__file__))
     from executor_logic import run_calculation
 
 def main():
-    # 1. 路径初始化
     CURRENT_DIR = Path(__file__).resolve().parent
     PROJECT_ROOT = CURRENT_DIR.parent.parent
     LOG_DIR = PROJECT_ROOT / "logs"
     LOG_DIR.mkdir(exist_ok=True)
     
-    log_file_path = LOG_DIR / "sandbox_log.txt"
+    log_file_path = LOG_DIR / "sandbox.log"
 
     input_str = sys.argv[1] if len(sys.argv) > 1 else "{}"
     

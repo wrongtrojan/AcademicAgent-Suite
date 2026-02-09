@@ -11,7 +11,7 @@ def run_whisper(params):
     LOG_DIR = PROJECT_ROOT / "logs"
     LOG_DIR.mkdir(exist_ok=True)
     
-    log_file_path = LOG_DIR / "audio_pro_log.txt"
+    log_file_path = LOG_DIR / "audio_pro.log"
     logic_script = os.path.join(SCRIPT_DIR, "whisper_node.py")
     python_exe = sys.executable
 

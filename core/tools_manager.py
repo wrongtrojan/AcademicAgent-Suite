@@ -3,13 +3,26 @@ import json
 import os
 import yaml
 import logging
+import time
 from pathlib import Path
+from core.system_state import SystemStateManager, SystemStatus
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [Brain-Center] - %(levelname)s - %(message)s')
+# Global directory for log assets
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+
+# Console logging configuration for ToolsManager
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - [TOOLS-MANAGER] - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("ToolsManager")
 
 class ToolsManager:
     def __init__(self, config_path="configs/model_config.yaml"):
+        """
+        Initialize the multi-environment gateway.
+        """
         self.project_root = Path(__file__).resolve().parent.parent
         full_config_path = self.project_root / config_path
         
@@ -17,81 +30,111 @@ class ToolsManager:
             self.config = yaml.safe_load(f)
         
         self.envs = self.config.get('environments', {})
-        self.base_dir = str(self.project_root)
-        logger.info("✅ Academic Brain Toolbox is online: All expert environments have been mounted.")
+        self.state_manager = SystemStateManager()
+        self.expert_log_path = LOG_DIR / "tools_expert.log"
+        
+        logger.info("Resource-Aware Toolbox initialized. VRAM monitoring active.")
 
-    def _dispatch_raw(self, env_key, script_rel_path, params=None):
+    def _dispatch_subprocess(self, env_key, script_rel_path, params=None, task_type=SystemStatus.INGESTING):
+        """
+        Low-level subprocess dispatcher with Non-Interference logging principle.
+        Logs only metadata to tools_expert.log; business logs are handled internally by services.
+        """
+        # 1. Resource Guard: Prevent VRAM collisions during ingestion
+        if task_type == SystemStatus.INGESTING and self.state_manager.get_status == SystemStatus.INGESTING:
+            logger.error(f"VRAM Collision: {script_rel_path} blocked by active ingestion.")
+            return {"status": "error", "message": "VRAM locked by another process."}
+
         python_exe = self.envs.get(env_key)
+        script_path = self.project_root / script_rel_path
+        
         if not python_exe or not os.path.exists(python_exe):
-            return {"status": "error", "message": f"Environment {env_key} configuration is invalid or does not exist"}
+            logger.error(f"Environment Error: Interpreter not found for {env_key}.")
+            return {"status": "error", "message": f"Invalid env: {env_key}"}
 
-        script_path = os.path.join(self.base_dir, script_rel_path)
+        # Serialize parameters with support for Chinese characters
         json_params = json.dumps(params if params else {}, ensure_ascii=False)
+        start_time = time.time()
 
         try:
-            result = subprocess.run(
-                [python_exe, script_path, json_params],
-                capture_output=True,
+            # 2. Subprocess Execution
+            # stdout/stderr are captured for JSON extraction but NOT piped to tools_expert.log
+            process = subprocess.Popen(
+                [python_exe, str(script_path), json_params],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                cwd=self.base_dir
+                cwd=str(self.project_root)
             )
             
-            if result.returncode != 0:
-                logger.error(f"❌ Expert {script_rel_path} exited abnormally: {result.stderr}")
-                return {"status": "error", "message": "Subprocess execution failed", "details": result.stderr}
+            stdout, stderr = process.communicate()
+            duration = time.time() - start_time
 
-            output_lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
+            # 3. Metadata-Only Logging (Non-Interference)
+            with open(self.expert_log_path, 'a', encoding='utf-8') as f:
+                log_entry = (
+                    f"--- [SUBPROCESS_INVOCATION] ---\n"
+                    f"Timestamp: {time.ctime()}\n"
+                    f"Script: {script_rel_path}\n"
+                    f"Params: {json_params}\n"
+                    f"Exit_Code: {process.returncode}\n"
+                    f"Duration: {duration:.2f}s\n"
+                    f"-------------------------------\n"
+                )
+                f.write(log_entry)
+
+            if process.returncode != 0:
+                logger.error(f"Expert Execution Failed: {script_rel_path}")
+                return {"status": "error", "details": stderr.strip()}
+
+            # 4. Result Extraction: Capture the last line as JSON output
+            output_lines = [l for l in stdout.strip().split('\n') if l.strip()]
             if not output_lines:
-                return {"status": "error", "message": "Expert did not return a valid JSON result"}
-                
-            return json.loads(output_lines[-1])
+                return {"status": "error", "message": "No output from expert script."}
+            
+            try:
+                return json.loads(output_lines[-1])
+            except json.JSONDecodeError:
+                return {"status": "success", "raw_output": output_lines[-1]}
 
         except Exception as e:
-            return {"status": "error", "message": f"Brain dispatch link failure: {str(e)}"}
+            logger.error(f"Dispatch Exception: {str(e)}")
+            return {"status": "error", "message": str(e)}
 
-    # ================= Explicit Expert Interfaces ==================
+    # ================= EXPERT INTERFACES (Wrappers) ==================
 
-    def call_visual_eye(self, image_path, prompt):
-        logger.info(f"👁️ [Visual Reasoning] Processing image: {os.path.basename(image_path)}")
-        return self._dispatch_raw(
-            "visual_reasoning_env", 
-            "services/reasoning_eye/visual_wrapper.py", 
-            {"image": image_path, "prompt": prompt}
+    def call_data_manager(self, params: dict):
+        """Final Step: DataStreamOrchestrator for vectorization."""
+        logger.info(f"🚀 [Data Pipeline] Launching manager...")
+        return self._dispatch_subprocess("data_pro", "data_layer/data_wrapper.py", params)
+
+    def call_searcher(self, params: dict):
+        """Querying: Vector search across Milvus indices."""
+        logger.info(f"🔍 [Vector Search] Dispatching searcher for query...")
+        return self._dispatch_subprocess(
+            "data_pro", "data_layer/search_wrapper.py", params, 
+            task_type=SystemStatus.QUERYING
         )
 
-    def call_whisper_node(self, audio_id=None):
-        logger.info("👂 [Audio Transcription] Starting audio transcription expert pipeline...")
-        return self._dispatch_raw(
-            "audio_processing_env", 
-            "data_layer/audio_pro/audio_wrapper.py", 
-            {"audio_id": audio_id}
+    def call_video_slicer(self, params: dict):
+        """Parsing: Video frame and audio extraction."""
+        logger.info(f"✂️ [Video Slicer] Processing video...")
+        return self._dispatch_subprocess("video_vision", "services/video_pro/video_wrapper.py", params)
+
+    def call_whisper_node(self, params: dict):
+        """Parsing: Audio to text transcription."""
+        logger.info(f"👂 [Audio Expert] Processing audio...")
+        return self._dispatch_subprocess("audio_pro", "services/audio_pro/audio_wrapper.py", params)
+
+    def call_pdf_parser(self, params: dict):
+        """Parsing: MinerU structured document extraction."""
+        logger.info(f"📄 [Doc Parser] Processing PDF...")
+        return self._dispatch_subprocess("doc_parser", "services/pdf_pro/pdf_wrapper.py", params)
+
+    def call_sandbox(self, params: dict):
+        """Reasoning: Code and symbolic verification."""
+        logger.info(f"🔢 [Sandbox] Computing...")
+        return self._dispatch_subprocess(
+            "sandbox", "services/sandbox/sandbox_wrapper.py", params,
+            task_type=SystemStatus.QUERYING
         )
-
-    def call_pdf_expert(self, pdf_id=None):
-        logger.info(f"📄 [Doc Parsing] Scheduling MinerU parsing task: {pdf_id}: {pdf_id}")
-        return self._dispatch_raw(
-            "pdf_processing_env", 
-            "data_layer/pdf_pro/pdf_wrapper.py", 
-            {"pdf_id": pdf_id}
-        )
-
-    def call_sandbox(self, expression, mode="eval"):
-        logger.info(f"🔢 [Scientific Computing] Executing expression: {expression}")
-        return self._dispatch_raw(
-            "scientific_env", 
-            "services/sandbox/sandbox_wrapper.py", 
-            {"expression": expression, "mode": mode}
-        )
-
-    def call_video_slicer(self, video_path=None):
-        logger.info("✂️ [Video Slicing] Starting full video asset preprocessing...")
-        return self._dispatch_raw(
-            "video_vision_env", 
-            "data_layer/video_pro/video_wrapper.py", 
-            {"video_path": video_path}
-        )
-
-
-if __name__ == "__main__":
-    manager = ToolsManager()
-    
