@@ -1,4 +1,3 @@
-import os
 import json
 import yaml
 import torch
@@ -8,6 +7,23 @@ from pathlib import Path
 from PIL import Image
 import torch.nn.functional as F
 from transformers import CLIPProcessor, CLIPModel
+
+import tqdm
+class DisabledTqdm:
+    def __init__(self, *args, **kwargs): pass
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+    def __iter__(self): return self
+    def __next__(self): raise StopIteration
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+tqdm.tqdm = DisabledTqdm
+try:
+    import tqdm.auto
+    tqdm.auto.tqdm = DisabledTqdm
+except ImportError:
+    pass
 
 logging.basicConfig(
     level=logging.INFO, 

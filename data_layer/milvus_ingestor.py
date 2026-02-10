@@ -137,20 +137,23 @@ class UnifiedIngestor:
 
             names, modalities, types, refs, timestamps, vecs = [], [], [], [], [], []
 
-            for img_name, vec in data.get("images", {}).items():
+            for img_name, img_info in data.get("images", {}).items():
                 remote_url = img_name
+                actual_vec=img_info.get("embedding")
+                page_idx = img_info.get("page_idx", -1)
                 if img_dir:
                     remote_url = self._upload_file(img_dir / img_name, f"pdf/{doc_dir.name}/{img_name}")
-                
-                names.append(doc_dir.name); modalities.append("pdf")
-                types.append("image"); refs.append(remote_url)
-                timestamps.append(-1.0); vecs.append(vec)
+                if actual_vec:
+                    names.append(doc_dir.name); modalities.append("pdf")
+                    types.append("image"); refs.append(remote_url)
+                    timestamps.append(float(page_idx+1)); vecs.append(actual_vec)
 
             for chunk in data.get("text_chunks", []):
                 names.append(doc_dir.name); modalities.append("pdf")
                 types.append("text"); refs.append(chunk.get("text_slice", ""))
-                timestamps.append(-1.0); vecs.append(chunk["embedding"])
-
+                vecs.append(chunk["embedding"])
+                page_num = float(chunk.get("page_idx", 0) + 1) 
+                timestamps.append(page_num)
             if names:
                 self.collection.insert([names, modalities, types, refs, timestamps, vecs])
                 logger.info(f"✅ [DONE] PDF {doc_dir.name} ingestion complete (including image uploads)")

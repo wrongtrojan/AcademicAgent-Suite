@@ -58,4 +58,6 @@ class SystemStateManager:
 
     def is_query_allowed(self) -> bool:
         """Check if the Brain is available for user questions."""
-        return self._current_status != SystemStatus.INGESTING
+        # Ensure status is strictly IDLE to allow querying
+        with self._state_lock:
+            return self._current_status == SystemStatus.IDLE

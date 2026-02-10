@@ -17,32 +17,31 @@ class IngestionStream:
 
     async def run_pipeline(self, asset_type: str, params: dict):
         """
-        The main entry point for Track A.
-        Follows the sequence: Parsing (Preparation) -> Unified Ingestion.
+        Modified to support 'all' type for batch processing.
+        Parsing (Preparation) -> Unified Ingestion.
         """
-        # Extract the unique ID to manage VRAM locking
         asset_id = params.get("asset_id") or params.get("video_id") or params.get("pdf_id")
-        
         if not asset_id:
-            return {"status": "error", "message": "Missing asset_id in parameters."}
+            return {"status": "error", "message": "Missing asset_id."}
 
-        # 1. Resource Guard: Acquire global VRAM lock
         if not self.state_manager.acquire_ingestion_lock(task_id=asset_id):
             return {"status": "error", "message": "System VRAM is busy."}
 
         try:
-            # 2. Sequential Dispatching (The Domino Effect)
+            # 1. Parsing Phase: Handle different asset types
             if asset_type == "video":
-                # Step A: Slice & Audio Extraction -> Step B: Transcription
                 await self._dispatch_video_workflow(params)
             elif asset_type == "pdf":
-                # Step A: Document Parsing
                 await self._dispatch_pdf_workflow(params)
+            elif asset_type == "all":
+                logger.info(f"🚀 Processing Multi-Modal bundle for [{asset_id}]...")
+                # Run both workflows. You can use asyncio.gather for parallelism if VRAM allows.
+                await self._dispatch_pdf_workflow(params)
+                await self._dispatch_video_workflow(params)
             else:
                 raise ValueError(f"Unsupported asset type: {asset_type}")
 
-            # 3. Final Step: Unified Ingestion
-            # All materials (Markdown/Frames/Transcripts) are now in storage/processed/
+            # 2. Unified Indexing: Only called once after all parsing is done
             logger.info(f"All materials ready. Triggering DataManager for indexing...")
             ingest_res = await asyncio.to_thread(
                 self.tools.call_data_manager, 
@@ -53,9 +52,7 @@ class IngestionStream:
         except Exception as e:
             logger.error(f"Ingestion Pipeline Failure [{asset_id}]: {str(e)}")
             return {"status": "error", "message": str(e)}
-        
         finally:
-            # 4. Critical: Always release the lock to allow future tasks or querying
             self.state_manager.release_lock()
 
     async def _dispatch_video_workflow(self, params: dict):

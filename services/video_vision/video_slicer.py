@@ -113,17 +113,24 @@ class VideoSlicer:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration_sec = total_frames / fps if fps > 0 else 0
         
+        logger.info(f"Video Info: Duration {duration_sec:.2f}s | FPS {fps}")
+        
         last_saved_time = -self.v_cfg['min_interval']
         prev_gray = None
         count = 0
         saved_frames = 0
         start_t = time.time()
 
+        report_step = max(int(total_frames / 5), 1)
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret: break
             
             timestamp = count / fps
+            if count % report_step == 0 and count > 0:
+                logger.info(f"Slicing progress: {timestamp:.1f} seconds of visual analysis completed...")
+                
             if count % int(fps / self.v_cfg['sample_rate']) == 0:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 gray = cv2.GaussianBlur(gray, (21, 21), 0)

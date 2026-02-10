@@ -41,9 +41,9 @@ class ToolsManager:
         Logs only metadata to tools_expert.log; business logs are handled internally by services.
         """
         # 1. Resource Guard: Prevent VRAM collisions during ingestion
-        if task_type == SystemStatus.INGESTING and self.state_manager.get_status == SystemStatus.INGESTING:
+        if task_type == SystemStatus.QUERYING and self.state_manager.get_status == SystemStatus.INGESTING:
             logger.error(f"VRAM Collision: {script_rel_path} blocked by active ingestion.")
-            return {"status": "error", "message": "VRAM locked by another process."}
+            return {"status": "error", "message": "VRAM locked by ingestion."}
 
         python_exe = self.envs.get(env_key)
         script_path = self.project_root / script_rel_path
@@ -52,20 +52,27 @@ class ToolsManager:
             logger.error(f"Environment Error: Interpreter not found for {env_key}.")
             return {"status": "error", "message": f"Invalid env: {env_key}"}
 
-        # Serialize parameters with support for Chinese characters
+        current_env = os.environ.copy()
+        
+        venv_bin = str(Path(python_exe).parent)
+        
+        current_env["PATH"] = f"{venv_bin}:/usr/bin:/usr/local/bin:{current_env.get('PATH', '')}"
+        
+        current_env["PYTHONUNBUFFERED"] = "1"
+
         json_params = json.dumps(params if params else {}, ensure_ascii=False)
         start_time = time.time()
 
         try:
-            # 2. Subprocess Execution
-            # stdout/stderr are captured for JSON extraction but NOT piped to tools_expert.log
             process = subprocess.Popen(
                 [python_exe, str(script_path), json_params],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=str(self.project_root)
+                cwd=str(self.project_root),
+                env=current_env 
             )
+            # ------------------------------------------
             
             stdout, stderr = process.communicate()
             duration = time.time() - start_time
@@ -106,20 +113,20 @@ class ToolsManager:
     def call_data_manager(self, params: dict):
         """Final Step: DataStreamOrchestrator for vectorization."""
         logger.info(f"🚀 [Data Pipeline] Launching manager...")
-        return self._dispatch_subprocess("data_pro", "data_layer/data_wrapper.py", params)
+        return self._dispatch_subprocess("data_layer", "data_layer/data_wrapper.py", params)
 
     def call_searcher(self, params: dict):
         """Querying: Vector search across Milvus indices."""
         logger.info(f"🔍 [Vector Search] Dispatching searcher for query...")
         return self._dispatch_subprocess(
-            "data_pro", "data_layer/search_wrapper.py", params, 
+            "data_layer", "data_layer/search_wrapper.py", params, 
             task_type=SystemStatus.QUERYING
         )
 
     def call_video_slicer(self, params: dict):
         """Parsing: Video frame and audio extraction."""
         logger.info(f"✂️ [Video Slicer] Processing video...")
-        return self._dispatch_subprocess("video_vision", "services/video_pro/video_wrapper.py", params)
+        return self._dispatch_subprocess("video_slicer", "services/video_vision/video_wrapper.py", params)
 
     def call_whisper_node(self, params: dict):
         """Parsing: Audio to text transcription."""
@@ -129,7 +136,7 @@ class ToolsManager:
     def call_pdf_parser(self, params: dict):
         """Parsing: MinerU structured document extraction."""
         logger.info(f"📄 [Doc Parser] Processing PDF...")
-        return self._dispatch_subprocess("doc_parser", "services/pdf_pro/pdf_wrapper.py", params)
+        return self._dispatch_subprocess("doc_parser", "services/doc_parser/pdf_wrapper.py", params)
 
     def call_sandbox(self, params: dict):
         """Reasoning: Code and symbolic verification."""
