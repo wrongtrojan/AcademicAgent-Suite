@@ -138,6 +138,15 @@ class ToolsManager:
         logger.info(f"📄 [Doc Parser] Processing PDF...")
         return self._dispatch_subprocess("doc_parser", "services/doc_parser/pdf_wrapper.py", params)
 
+    def call_reasoning_eye(self, params: dict):
+        """Visual Expert: Multi-modal understanding via Qwen-VL."""
+        logger.info(f"👁️ [Reasoning Eye] Dispatching VLM for visual analysis...")
+        return self._dispatch_subprocess(
+            "reasoning_eye", "services/reasoning_eye/visual_wrapper.py", 
+            params,
+            task_type=SystemStatus.QUERYING
+        )
+    
     def call_sandbox(self, params: dict):
         """Reasoning: Code and symbolic verification."""
         logger.info(f"🔢 [Sandbox] Computing...")

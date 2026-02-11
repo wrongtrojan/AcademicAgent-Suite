@@ -1,30 +1,40 @@
 import logging
 import asyncio
-from typing import  List, Dict, Any, TypedDict
+import os
+import json
+import httpx
+import yaml
+from typing import List, Dict, Any, TypedDict
 from pathlib import Path
 from langgraph.graph import StateGraph, END
-import re
-import json
-# External state and tools management
+from langgraph.checkpoint.redis import AsyncRedisSaver
+from dotenv import load_dotenv
+
+# Internal core components
 from core.tools_manager import ToolsManager
 from core.system_state import SystemStateManager, SystemStatus
+from core.prompt_manager import PromptManager
 
 # Standard logging configuration
 logger = logging.getLogger("ReasoningStream")
+load_dotenv()
 
 class AgentState(TypedDict):
     """
     Main state object for LangGraph, capturing the context across nodes.
     Aligned with PROPOSAL.md for academic reasoning and pruning.
     """
-    query: str                       # Original user query
-    retrieved_docs: List[Dict]       # Documents from searcher with metadata
-    verification_results: List[Any]  # Results from Sandbox execution
-    vlm_feedback: str               # Feedback from Visual Expert (if needed)
-    reasoning_chain: List[str]       # Internal CoT logs (to be pruned later)
-    final_answer: str                # Polished response for the user
-    citations: List[str]             # List of [Timestamp/Page] anchors
-    status: str                      # Current workflow status
+    query: str
+    retrieved_docs: List[Dict]
+    verification_results: str  # Store sandbox strings or results
+    vlm_feedback: str
+    reasoning_chain: List[str]
+    final_answer: str
+    citations: List[Dict[str, Any]]
+    graph_data: Dict[str, Any]
+    status: str
+    task_manifest: Dict[str, Any] # New: Intent-driven task list
+    has_video: bool               # Routing flag
 
 class ReasoningStream:
     def __init__(self, tools_manager: ToolsManager):
@@ -33,7 +43,21 @@ class ReasoningStream:
         """
         self.tools = tools_manager
         self.state_manager = SystemStateManager()
+        self.prompt_manager = PromptManager()
         self.project_root = Path(__file__).resolve().parent.parent
+        
+        # API Configurations from .env
+        self.api_key = os.getenv("DEEPSEEK_API_KEY")
+        self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        
+        # Redis setup for state persistence and checkpointing
+        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        logger.info(f"Redis Persistence active at {self.redis_url}")
+        
+        # Load Global Strategies
+        strategy_path = self.project_root / "configs" / "strategies.yaml"
+        with open(strategy_path, 'r', encoding='utf-8') as f:
+            self.strategies = yaml.safe_load(f)
 
     async def _check_resource_lock(self) -> bool:
         """
@@ -44,42 +68,35 @@ class ReasoningStream:
             logger.error("VRAM Guard: Query denied. Ingestion task in progress.")
             return False
         return True
-
-    async def execute_query(self, query: str, asset_id: str = None):
-        """
-        The main async entry point for Track B reasoning flow.
-        """
-        # Step 1: Resource Admission Control
-        if not await self._check_resource_lock():
-            return {
-                "status": "error", 
-                "message": "System is busy processing assets. Please wait."
-            }
-
-        # Initial State setup
-        initial_state: AgentState = {
-            "query": query,
-            "retrieved_docs": [],
-            "verification_results": [],
-            "vlm_feedback": "",
-            "reasoning_chain": [f"User initiated query: {query}"],
-            "final_answer": "",
-            "citations": [],
-            "status": "started"
+    
+    async def _deepseek_call(self, prompt: str, json_mode: bool = False) -> Any:
+        """Standard DeepSeek API caller."""
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
-        logger.info(f"🧠 [Reasoning-Core] Workflow started for query: {query[:50]}...")
-        
-        # Note: The LangGraph execution logic will be implemented in Phase 3.
-        # For now, this serves as the foundational interface.
-        return initial_state
-    # --- Node Implementation ---
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions", 
+                    headers=headers, 
+                    json=payload, 
+                    timeout=60.0
+                )
+                raw_content = response.json()['choices'][0]['message']['content']
+                return json.loads(raw_content) if json_mode else raw_content
+        except Exception as e:
+            logger.error(f"DeepSeek API Error: {str(e)}")
+            return {"error": str(e)}
+
+    # --- Node Implementations ---
 
     async def research_node(self, state: AgentState) -> Dict:
-        """
-        Retrieval Node: Fetches structured evidence and performs smart citation anchoring.
-       
-        """
+        """Retrieval Node: Fetches structured evidence."""
         query = state["query"]
         logger.info(f"🔍 [Node: Research] Fetching evidence for: {query[:30]}...")
 
@@ -87,176 +104,154 @@ class ReasoningStream:
         raw_res = await asyncio.to_thread(self.tools.call_searcher, search_params)
         
         if isinstance(raw_res, list):
-            new_docs = raw_res
-            # A. Improved Citation Logic: Use a set for auto-deduplication during collection
-            citation_set = set()
-            for doc in new_docs:
-                meta=doc.get("metadata", {})
+            structured_citations = []
+            has_video = False
+            for doc in raw_res:
+                meta = doc.get("metadata", {})
                 modality = meta.get("modality")
-                if modality == "video" and meta.get:
-                    val = meta.get("timestamp")
-                    ts = int(val)
-                    citation_set.add(f"[Video @ {ts//60:02d}:{ts%60:02d}]") 
-                elif modality == "pdf" and meta.get:
-                    val = meta.get("page_label") 
-                    citation_set.add(f"[PDF Page {int(val)}]")
+                
+                cite_item = {"type": modality, "asset_id": meta.get("asset_name")}
+                if modality == "video":
+                    has_video = True
+                    ts = int(meta.get("timestamp", 0))
+                    cite_item.update({"seconds": ts, "label": f"{ts//60:02d}:{ts%60:02d}"})
+                elif modality == "pdf":
+                    page = meta.get("page_label", "0")
+                    cite_item.update({"page": int(page), "bbox": meta.get("bbox", [])})
             
-            sorted_citations = sorted(list(citation_set))
-            
-            # Sort citations to ensure academic consistency (e.g., Page 1 before Page 10)
-            sorted_citations = sorted(list(citation_set))
+                structured_citations.append(cite_item)
+                
+            # Intent Analysis: Decide if we need Vision or Sandbox
+            intent_prompt = self.prompt_manager.render("intent_check", query=query, docs=raw_res, any_video=has_video)
+            manifest = await self._deepseek_call(intent_prompt, json_mode=True)
             
             return {
-                "retrieved_docs": new_docs,
-                "citations": sorted_citations,
-                "reasoning_chain": state["reasoning_chain"] + [f"Retrieved {len(new_docs)} docs with {len(sorted_citations)} unique anchors."],
+                "retrieved_docs": raw_res,
+                "citations": list(structured_citations),
+                "has_video": has_video,
+                "task_manifest": manifest,
+                "reasoning_chain": state["reasoning_chain"] + [f"Retrieved {len(raw_res)} docs. Intent: {manifest.get('reasoning_focus')}"],
                 "status": "researched"
             }
         return {"status": "error", "reasoning_chain": state["reasoning_chain"] + ["Search failed."]}
 
-    async def logic_node(self, state: AgentState) -> Dict:
-        """
-        Verification Node: Dynamically extracts and validates formulas.
-       
-        """
-        # B. Dynamic Expression Extraction
-        # Simulate LLM extraction by scanning retrieved content for LaTeX-like patterns
-        combined_content = " ".join([d["content"] for d in state["retrieved_docs"]])
+    async def vision_node(self, state: AgentState) -> Dict:
+        """Visual Expert Node: Analyzes frames based on intent strategy."""
+        if not state.get("has_video") or not state["task_manifest"].get("need_vision"):
+            return {"status": "vision_skipped"}
+
+        logger.info("🎨 [Node: Vision] Analyzing video frames for visual evidence...")
+        video_docs = [d for d in state["retrieved_docs"] if d.get("metadata", {}).get("modality") == "video"]
         
-        # Regex to find formulas between $...$ or in common math notation
-        # For testing, if no formula found, we fallback to a query-based trigger
-        formulas = re.findall(r"\$(.{2,})\$", combined_content) # 至少抓取2个字符
-        if formulas:
-            # 过滤掉只有等号或标点的噪声
-            valid_formulas = [f for f in formulas if any(c.isalnum() for c in f)]
-            if valid_formulas:
-                target_expr = valid_formulas[0]
-            logger.info(f"🔢 [Node: Logic] Extracted formula: {target_expr}. Invoking Sandbox...")
-            
-            sandbox_params = {
-                "expression": target_expr, 
-                "mode": "solve",
-                "symbol": "x"
+        top_video = video_docs[0]
+        asset_name = top_video["metadata"].get("asset_id")
+        ts = int(top_video["metadata"].get("timestamp", 0))
+        
+        # Path aligned with your provided structure
+        frame_path = self.project_root / "storage" / "processed" / "video" / asset_name / "frames" / f"frame_{ts}.jpg"
+        
+        strategy_key = state["task_manifest"].get("vision_strategy", "scene_description")
+        vlm_instruction = self.strategies["expert_strategies"]["vision_eye"].get(strategy_key)
+
+        if frame_path.exists():
+            vlm_params = {
+                "image": str(frame_path),
+                "prompt": f"{vlm_instruction} Context: {state['query']}"
             }
-            
-            verification = await asyncio.to_thread(self.tools.call_sandbox, sandbox_params)
+            vlm_res = await asyncio.to_thread(self.tools.call_reasoning_eye, vlm_params)
             
             return {
-                "verification_results": [verification],
-                "reasoning_chain": state["reasoning_chain"] + [f"Verified formula '${target_expr}$' via Sandbox."],
-                "status": "verified"
+                "vlm_feedback": vlm_res.get("description", "Vision parse failed."),
+                "reasoning_chain": state["reasoning_chain"] + [f"VLM analyzed frame at {ts}s using {strategy_key} strategy."]
             }
-        
-        logger.info("🔢 [Node: Logic] No formulas found in context. Skipping verification.")
-        return {"reasoning_chain": state["reasoning_chain"] + ["No formulas detected in retrieved chunks."]}
+        return {"vlm_feedback": "Frame not found."}
 
-    # --- Routing Logic ---
+    async def logic_node(self, state: AgentState) -> Dict:
+        """Verification Node: Prepares SymPy code via DeepSeek then runs Sandbox."""
+        if not state["task_manifest"].get("need_sandbox"):
+            return {"verification_results": "No verification required."}
 
-    def should_continue(self, state: AgentState) -> str:
-        """
-        Determines the next path in the graph.
-       
-        """
-        if state.get("status") == "error":
-            return "end"
-        if not state["retrieved_docs"]:
-            return "research"
-        if state["status"] == "researched":
-            return "verify"
-        return "synthesize"
-
-    async def synthesize_node(self, state: AgentState) -> Dict:
-        """
-        Synthesis Node: Finalizes the answer with CoT pruning and citations.
-       
-        """
-        logger.info("✍️ [Node: Synthesis] Finalizing academic response...")
+        logger.info("🧠 [Node: Logic] Invoking DeepSeek for formula extraction...")
+        combined_content = " ".join([d["content"] for d in state["retrieved_docs"]])
         
-        # 1. Gather all verification signals
-        is_verified = all(v.get("status") == "success" for v in state["verification_results"]) if state["verification_results"] else None
+        prep_prompt = self.prompt_manager.render("sandbox_prep", context=combined_content)
+        prep_res = await self._deepseek_call(prep_prompt, json_mode=True)
         
-        # 2. Format Context for LLM (Simulated)
-        # In a real setup, we pass the retrieved_docs and verification_results to an LLM here.
-        # Here we construct the response based on our citation pool.
-        
-        verification_msg = ""
-        if is_verified is True:
-            verification_msg = "\n(Verification: This calculation has been validated by the Scientific Sandbox.)"
-        elif is_verified is False:
-            verification_msg = "\n(Note: Sandbox verification detected potential inconsistencies in the logic.)"
-
-        # 3. Citation Formatting
-        citation_text = " ".join(state["citations"])
-        
-        # Pruning Logic: We only provide the verified conclusion and source anchors
-        final_text = (
-            f"Based on the analyzed materials, here is the answer to: '{state['query']}'\n\n"
-            f"[Conclusion]: ... (Verified logic applied) ...\n"
-            f"{verification_msg}\n\n"
-            f"Sources: {citation_text}"
-        )
-
+        if prep_res.get("expression") != "empty":
+            logger.info(f"🔢 [Node: Logic] Invoking Sandbox for {prep_res.get('target_variable')}...")
+            res = await asyncio.to_thread(self.tools.call_sandbox, prep_res)
+            verification = f"Verified: {res.get('result')}"
+        else:
+            verification = "No complex formulas extracted."
+            
         return {
-            "final_answer": final_text,
-            "status": "completed",
-            "reasoning_chain": state["reasoning_chain"] + ["Synthesis complete. Pruned intermediate CoT."]
+            "verification_results": verification,
+            "reasoning_chain": state["reasoning_chain"] + [f"Logic check: {verification}"]
         }
 
-    def _build_workflow(self):
-        """
-        Assembles the LangGraph state machine.
-        """
+    async def synthesize_node(self, state: AgentState) -> Dict:
+        """Synthesis Node: Finalizes the answer with CoT pruning."""
+        logger.info("✍️ [Node: Synthesis] Finalizing academic response...")
+        
+        synth_prompt = self.prompt_manager.render(
+            "synthesizer",
+            docs=state["retrieved_docs"],
+            vlm_feedback=state.get("vlm_feedback"),
+            math_res=state.get("verification_results")
+        )
+        
+        final_answer = await self._deepseek_call(synth_prompt)
+        
+        mock_graph = {"nodes": [], "links": []}
+        
+        return {
+            "final_answer": final_answer,
+            "graph_data": mock_graph,
+            "status": "completed",
+            "reasoning_chain": state["reasoning_chain"] + ["Synthesis complete. Pruned CoT."]
+        }
+
+    def _build_workflow(self,saver):
+        """Assembles the LangGraph state machine with conditional routing."""
         workflow = StateGraph(AgentState)
 
-        # Define Nodes
         workflow.add_node("research", self.research_node)
+        workflow.add_node("vision_eye", self.vision_node)
         workflow.add_node("verify", self.logic_node)
         workflow.add_node("synthesize", self.synthesize_node)
 
-        # Define Edges and Conditional Logic
         workflow.set_entry_point("research")
         
-        # Simple linear flow for the baseline; can be branched via should_continue
-        workflow.add_edge("research", "verify")
+        def route_after_research(state: AgentState):
+            if state.get("status") == "error": return END
+            # Check manifest for vision requirement
+            return "vision_eye" if state["task_manifest"].get("need_vision") else "verify"
+        
+        workflow.add_conditional_edges("research", route_after_research)
+        workflow.add_edge("vision_eye", "verify")
         workflow.add_edge("verify", "synthesize")
         workflow.add_edge("synthesize", END)
+        
+        return workflow.compile(checkpointer=saver)
 
-        return workflow.compile()
-
-    async def execute_query(self, query: str, asset_id: str = None):
-        """
-        The main async entry point: Checks VRAM -> Runs Graph -> Returns Result.
-       
-        """
-        # Step 1: Resource Guard
+    async def execute_query(self, query: str,thread_id: str):
+        """Entry point with VRAM guard and Lock management."""
         if not await self._check_resource_lock():
             return {"status": "error", "message": "VRAM Locked by Ingestion."}
 
-        # Step 2: Transition System State to QUERYING
         self.state_manager._current_status = SystemStatus.QUERYING
         
+        config = {"configurable": {"thread_id": thread_id}}
+        
         try:
-            # Step 3: Run the Compiled Graph
-            app = self._build_workflow()
-            
-            # Initializing state
-            inputs = {
-                "query": query,
-                "retrieved_docs": [],
-                "verification_results": [],
-                "vlm_feedback": "",
-                "reasoning_chain": [f"Init query: {query}"],
-                "final_answer": "",
-                "citations": [],
-                "status": "started"
-            }
-            
-            # Streaming execution (can use .invoke for non-streaming)
-            final_state = await app.ainvoke(inputs)
-            
-            logger.info(f"✨ [Reasoning-Core] Task complete for query: {query[:30]}")
-            return final_state
-
+            async with AsyncRedisSaver.from_conn_string(self.redis_url) as saver:
+                app = self._build_workflow(saver)
+                inputs = {
+                    "query": query, "retrieved_docs": [], "verification_results": "",
+                    "vlm_feedback": "", "reasoning_chain": [f"Init: {query}"],
+                    "final_answer": "", "citations": [], "status": "started",
+                    "task_manifest": {}, "has_video": False, "graph_data": {}
+                }
+                return await app.ainvoke(inputs, config=config)
         finally:
-            # Always return to IDLE to release VRAM
             self.state_manager.release_lock()

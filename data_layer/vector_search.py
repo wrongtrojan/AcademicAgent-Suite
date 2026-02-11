@@ -68,7 +68,7 @@ class AcademicSearcher:
             param=search_params,
             limit=top_k * 2,  # Over-fetch for reranking
             expr=expr,
-            output_fields=["asset_name", "modality", "content_type", "content_ref", "timestamp"]
+            output_fields=["asset_name", "modality", "content_type", "content_ref", "coordinates", "timestamp"]
         )
 
         formatted_results = []
@@ -95,6 +95,7 @@ class AcademicSearcher:
                     "asset_id": hit.entity.get("asset_name"),
                     "modality": modality,
                     "type": hit.entity.get("content_type"),
+                    "bbox": hit.entity.get("coordinates") ,
                     "timestamp": hit.entity.get("timestamp") if modality == "video" else None,
                     "page_label": hit.entity.get("timestamp") if modality == "pdf" else None # PDF uses timestamp field for page
                 }
@@ -107,8 +108,8 @@ class AcademicSearcher:
 if __name__ == "__main__":
     searcher = AcademicSearcher()
     # Testing with query "DDL"
-    res = searcher.search("DDL", top_k=10)
-    
+    res = searcher.search("重根", top_k=10)
+    print(res)
     for r in res:
         # Accessing nested metadata fields
         m = r['metadata']

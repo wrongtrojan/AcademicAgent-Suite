@@ -127,63 +127,69 @@ class CLIPWorker:
                 logger.warning(f"Could not find auto or ocr directory in {doc_name}, skipping")
                 continue
                 
-            img_dir = os.path.join(ocr_dir, "images")
-            content_list_path = os.path.join(ocr_dir, f"{doc_name}_content_list.json")
+            middle_path = os.path.join(ocr_dir, f"{doc_name}_middle.json")
 
             doc_results = {"images": {}, "text_chunks": []}
 
-            if os.path.exists(content_list_path):
+            if os.path.exists(middle_path):
                 try:
-                    with open(content_list_path, 'r', encoding='utf-8') as f:
-                        content_data = json.load(f)
-                    for item in content_data:
-                        page_idx = item.get("page_idx", -1) 
-                        item_type = item.get("type", "")
-                        
-                        if item_type in ["image", "table"] and "img_path" in item:
-                            img_relative_dir = item["img_path"]
-                            full_img_path = os.path.join(ocr_dir, img_relative_dir)
+                    with open(middle_path, 'r', encoding='utf-8') as f:
+                        middle_data = json.load(f)
+                    
+                    for page_idx, page_info in enumerate(middle_data.get("pdf_info", [])):
+                        for block in page_info.get("preproc_blocks", []):
+                            block_type = block.get("type", "")
+                            block_bbox = block.get("bbox", [])
 
-                            if os.path.exists(full_img_path):
-                                try:
-                                    image = Image.open(full_img_path).convert("RGB")
-                                    inputs = self.processor(images=image, return_tensors="pt").to(self.device)
-                                    with torch.no_grad():
-                                        outputs = self.model.get_image_features(**inputs)
-                                        embedding = self._get_aligned_embedding(outputs)
-                                    
-                                    img_name = os.path.basename(img_relative_dir)
-                                    img_caption = item.get("img_caption", "")
-                                    doc_results["images"][img_name] = {
-                                        "type": item_type,
-                                        "page_idx": page_idx,
-                                        "text_slice": img_caption[:50],
-                                        "embedding": embedding,
+                            if block_type in ["image", "table"] and "img_path" in block:
+                                img_relative_dir = block["img_path"]
+                                full_img_path = os.path.join(ocr_dir, img_relative_dir)
+                                if os.path.exists(full_img_path):
+                                    try:
+                                        image = Image.open(full_img_path).convert("RGB")
+                                        inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+                                        with torch.no_grad():
+                                            outputs = self.model.get_image_features(**inputs)
+                                            embedding = self._get_aligned_embedding(outputs)
                                         
-                                        
-                                    }
-                                except Exception as e:
-                                    logger.warning(f"Image {img_name} failed: {e}")
-                        
-                        else:            
-                            text = item.get("text") or item.get("text_content") or ""
-                            if len(text.strip()) < 5: continue 
+                                        img_name = os.path.basename(img_relative_dir)
+                                        doc_results["images"][img_name] = {
+                                            "type": block_type,
+                                            "page_idx": page_idx,
+                                            "text_slice": block.get("img_caption", "")[:50],
+                                            "embedding": embedding,
+                                            "bbox": block_bbox 
+                                        }
+                                    except Exception as e:
+                                        logger.warning(f"Image {img_name} failed: {e}")
 
-                            inputs = self.processor(text=[text], return_tensors="pt", padding=True, truncation=True).to(self.device)
-                            with torch.no_grad():
-                                outputs = self.model.get_text_features(**inputs)
-                                embedding = self._get_aligned_embedding(outputs)
-                            
-                            doc_results["text_chunks"].append({
-                                "type": item.get("type", "text"),
-                                "page_idx": page_idx,
-                                "text_slice": text[:50], 
-                                "embedding": embedding
-                            })
+                            else:
+                                lines = block.get("lines", [])
+                                full_text = ""
+                                if lines:
+                                    for line in lines:
+                                        for span in line.get("spans", []):
+                                            full_text += span.get("content", "")
+                                else:
+                                    full_text = block.get("text") or block.get("text_content") or ""
+
+                                if len(full_text.strip()) < 5: continue 
+
+                                inputs = self.processor(text=[full_text], return_tensors="pt", padding=True, truncation=True).to(self.device)
+                                with torch.no_grad():
+                                    outputs = self.model.get_text_features(**inputs)
+                                    embedding = self._get_aligned_embedding(outputs)
+                                
+                                doc_results["text_chunks"].append({
+                                    "type": block_type or "text",
+                                    "page_idx": page_idx,
+                                    "text_slice": full_text[:50], 
+                                    "embedding": embedding,
+                                    "bbox": block_bbox 
+                                })
                 except Exception as e:
-                    logger.warning(f"Text chunk processing failed: {e}")
+                    logger.warning(f"MinerU middle.json processing failed: {e}")
 
-            # 3. 保存结果
             with open(output_json, "w", encoding='utf-8') as f:
                 json.dump(doc_results, f, indent=4, ensure_ascii=False)
             logger.info(f"Document {doc_name} features saved successfully")

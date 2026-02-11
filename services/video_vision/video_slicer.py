@@ -147,8 +147,8 @@ class VideoSlicer:
             count += 1
         cap.release()
 
-        min_density = 0.125
-        expected_min = max(int(duration_sec * min_density), 5) # 至少5帧兜底
+        min_density = 1/15
+        expected_min = max(int(duration_sec * min_density), 5) 
 
         if saved_frames < expected_min:
             logger.warning(f"Excessive static footage detected: Semantic slicing only yielded {saved_frames} frames, below academic syllabus requirements ({expected_min} frames)")

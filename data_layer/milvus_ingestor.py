@@ -99,7 +99,8 @@ class UnifiedIngestor:
             FieldSchema(name="modality", dtype=DataType.VARCHAR, max_length=50),      
             FieldSchema(name="content_type", dtype=DataType.VARCHAR, max_length=50),  
             FieldSchema(name="content_ref", dtype=DataType.VARCHAR, max_length=1000), 
-            FieldSchema(name="timestamp", dtype=DataType.DOUBLE),                    
+            FieldSchema(name="timestamp", dtype=DataType.DOUBLE),               
+            FieldSchema(name="coordinates", dtype=DataType.VARCHAR, max_length=500),    
             FieldSchema(name=s['vec'], dtype=DataType.FLOAT_VECTOR, dim=c['dim'])
         ]
         schema = CollectionSchema(fields, "Unified Academic Assets with MinIO URLs")
@@ -135,7 +136,7 @@ class UnifiedIngestor:
                     img_dir = doc_dir / sub / "images"
                     break
 
-            names, modalities, types, refs, timestamps, vecs = [], [], [], [], [], []
+            names, modalities, types, refs, timestamps, coords, vecs = [], [], [], [], [], [], []
 
             for img_name, img_info in data.get("images", {}).items():
                 remote_url = img_name
@@ -147,15 +148,17 @@ class UnifiedIngestor:
                     names.append(doc_dir.name); modalities.append("pdf")
                     types.append("image"); refs.append(remote_url)
                     timestamps.append(float(page_idx+1)); vecs.append(actual_vec)
+                    coords.append(json.dumps(chunk.get("bbox", [])))
 
             for chunk in data.get("text_chunks", []):
                 names.append(doc_dir.name); modalities.append("pdf")
                 types.append("text"); refs.append(chunk.get("text_slice", ""))
                 vecs.append(chunk["embedding"])
                 page_num = float(chunk.get("page_idx", 0) + 1) 
+                coords.append(json.dumps(chunk.get("bbox", [])))
                 timestamps.append(page_num)
             if names:
-                self.collection.insert([names, modalities, types, refs, timestamps, vecs])
+                self.collection.insert([names, modalities, types, refs, timestamps, coords, vecs])
                 logger.info(f"✅ [DONE] PDF {doc_dir.name} ingestion complete (including image uploads)")
 
     def ingest_video_data(self):
@@ -173,7 +176,7 @@ class UnifiedIngestor:
             with open(meta_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            names, modalities, types, refs, timestamps, vecs = [], [], [], [], [], []
+            names, modalities, types, refs, timestamps, vecs = [], [], [], [], [], [] 
             frames_dir = v_dir / "frames"
 
             for item in data.get("alignments", []):
@@ -195,9 +198,9 @@ class UnifiedIngestor:
                     refs.append(item.get('context_text', '')[:500])
                     timestamps.append(item['timestamp'])
                     vecs.append(item['text_vector'])
-
+            coords=["null"] * len(names)
             if names:
-                self.collection.insert([names, modalities, types, refs, timestamps, vecs])
+                self.collection.insert([names, modalities, types, refs, timestamps, coords, vecs])
                 logger.info(f"✅ [DONE] Video {v_dir.name} ingestion complete (Total {len(names)} vector records)")
 
     def finish(self):
@@ -205,7 +208,7 @@ class UnifiedIngestor:
         logger.info("✨ Data synchronization and MinIO mapping completed successfully")
 
 if __name__ == "__main__":
-    ingestor = UnifiedIngestor(force_reset=False)
+    ingestor = UnifiedIngestor(force_reset=True)
     ingestor.ingest_pdf_data()
     ingestor.ingest_video_data()
     ingestor.finish()

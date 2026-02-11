@@ -1,0 +1,25 @@
+name: DataStreamOrchestrator
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - pillow
+  - pandas
+  - pyyaml
+  - tqdm
+  - pip:
+      - torch
+      - torchvision
+      - transformers==4.46.3
+      - open-clip-torch
+      - timm
+      - pymilvus
+      - redis
+      - minio
+      - boto3
+      - sqlalchemy

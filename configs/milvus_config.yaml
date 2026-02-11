@@ -16,4 +16,5 @@ schema:
   content_type: "content_type" 
   content_ref: "content_ref"   
   timestamp: "timestamp"       
+  coordinates: "coordinates"
   vec: "vector"
