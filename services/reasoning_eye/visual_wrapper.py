@@ -2,6 +2,7 @@ import sys
 import json
 import subprocess
 import os
+from datetime import datetime
 from pathlib import Path
 
 def run_visual_inference(params):
@@ -15,12 +16,14 @@ def run_visual_inference(params):
 
     try:
         with open(log_file_path, "a", encoding="utf-8") as log_f:
+            log_f.write(f"\n{'='*20} Visual Inference Started: {datetime.now()} {'='*20}\n")
+            log_f.flush()
             process = subprocess.Popen(
                 [sys.executable, "-u", str(logic_script), 
                  "--image", params.get("image", ""), 
                  "--prompt", params.get("prompt", "")],
                 stdout=subprocess.PIPE, 
-                stderr=log_f,          
+                stderr=subprocess.STDOUT,     
                 text=True,
                 cwd=str(PROJECT_ROOT)
             )
@@ -30,6 +33,7 @@ def run_visual_inference(params):
 
             for line in process.stdout:
                 log_f.write(line) 
+                log_f.flush()
                 if "--- RESULT_START ---" in line:
                     capture_mode = True
                     continue
@@ -41,6 +45,8 @@ def run_visual_inference(params):
             
             process.wait()
 
+        log_f.write(f"{'='*20} Task Finished with exit code: {process.returncode} {'='*20}\n")
+        
         if process.returncode == 0 and final_json_raw:
             return json.loads(final_json_raw.strip())
         else:

@@ -35,6 +35,8 @@ class AgentState(TypedDict):
     status: str
     task_manifest: Dict[str, Any] # New: Intent-driven task list
     has_video: bool               # Routing flag
+    eval_report: Dict[str, Any]   
+    retry_count: int              
 
 class ReasoningStream:
     def __init__(self, tools_manager: ToolsManager):
@@ -92,6 +94,19 @@ class ReasoningStream:
         except Exception as e:
             logger.error(f"DeepSeek API Error: {str(e)}")
             return {"error": str(e)}
+        
+    def _clean_json_string(self, raw_str: str) -> str:
+        """Removes Markdown code blocks and extra whitespace for robust JSON parsing."""
+        if not raw_str: return "{}"
+        cleaned = raw_str.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        return cleaned
 
     # --- Node Implementations ---
 
@@ -100,12 +115,30 @@ class ReasoningStream:
         query = state["query"]
         logger.info(f"🔍 [Node: Research] Fetching evidence for: {query[:30]}...")
 
-        search_params = {"query": query, "top_k": 5}
+        retry_idx = state.get("retry_count", 0)
+        logger.info(f"🔍 [Node: Research] Attempt {retry_idx + 1} | Query: {query[:30]}...")
+        
+        refine_prompt = self.prompt_manager.render(
+            "query_refiner", 
+            query=query, 
+            is_retry=(retry_idx > 0) 
+        )
+        refine_json = await self._deepseek_call(refine_prompt, json_mode=True)
+        
+        if isinstance(refine_json, str):
+            refine_json = json.loads(self._clean_json_string(refine_json)) 
+        
+        search_params = {
+            "query": " ".join(refine_json.get("search_params", {}).get("keywords", [query])),
+            "top_k": refine_json.get("search_params", {}).get("top_k", 5),
+            "preferences": refine_json.get("preferences") 
+        }
+        
         raw_res = await asyncio.to_thread(self.tools.call_searcher, search_params)
         
         if isinstance(raw_res, list):
             structured_citations = []
-            has_video = False
+            has_video = any(d.get("metadata", {}).get("modality") == "video" for d in raw_res)
             for doc in raw_res:
                 meta = doc.get("metadata", {})
                 modality = meta.get("modality")
@@ -113,8 +146,8 @@ class ReasoningStream:
                 cite_item = {"type": modality, "asset_id": meta.get("asset_name")}
                 if modality == "video":
                     has_video = True
-                    ts = int(meta.get("timestamp", 0))
-                    cite_item.update({"seconds": ts, "label": f"{ts//60:02d}:{ts%60:02d}"})
+                    ts = float(meta.get("timestamp", 0))
+                    cite_item.update({"seconds": ts, "label": f"{int(ts)//60:02d}:{int(ts)%60:02d}"})
                 elif modality == "pdf":
                     page = meta.get("page_label", "0")
                     cite_item.update({"page": int(page), "bbox": meta.get("bbox", [])})
@@ -135,6 +168,47 @@ class ReasoningStream:
             }
         return {"status": "error", "reasoning_chain": state["reasoning_chain"] + ["Search failed."]}
 
+    async def evaluate_node(self, state: AgentState) -> Dict:
+        """Auditor Node: Evaluates relevance and decides tool triggers."""
+        logger.info("⚖️ [Node: Evaluate] Auditing evidence relevance...")
+        
+        current_retry = state.get("retry_count", 0)
+        
+        eval_prompt = self.prompt_manager.render(
+            "evidence_evaluator", 
+            query=state["query"], 
+            docs=state["retrieved_docs"]
+        )
+        eval_report = await self._deepseek_call(eval_prompt, json_mode=True)
+        
+        if isinstance(eval_report, str):
+            try:
+                eval_report = json.loads(self._clean_json_string(eval_report))
+            except:
+                eval_report = {"action": "proceed"}
+        
+        if current_retry >= 2 and eval_report.get("action") == "refetch":
+            logger.warning(f"⚠️ Max retries ({current_retry + 1}) reached. Forcing 'proceed' with current evidence.")
+            eval_report["action"] = "proceed"
+        
+        # Override manifest based on evaluation
+        updated_manifest = state["task_manifest"].copy()
+        if eval_report.get("trigger_tools"):
+            tools_to_check = eval_report["trigger_tools"]
+            
+            if tools_to_check.get("call_reasoning_eye") is True:
+                updated_manifest["need_vision"] = True
+            
+            if tools_to_check.get("call_sandbox") is True:
+                updated_manifest["need_sandbox"] = True
+        
+        return {
+            "eval_report": eval_report,
+            "task_manifest": updated_manifest,
+            "retry_count": current_retry + 1 if eval_report.get("action") == "refetch" else current_retry,
+            "reasoning_chain": state["reasoning_chain"] + [f"Audit Result: {eval_report.get('action')}"]
+        }
+    
     async def vision_node(self, state: AgentState) -> Dict:
         """Visual Expert Node: Analyzes frames based on intent strategy."""
         if not state.get("has_video") or not state["task_manifest"].get("need_vision"):
@@ -145,13 +219,15 @@ class ReasoningStream:
         
         top_video = video_docs[0]
         asset_name = top_video["metadata"].get("asset_id")
-        ts = int(top_video["metadata"].get("timestamp", 0))
+        ts = (top_video["metadata"].get("timestamp", 0))
         
         # Path aligned with your provided structure
-        frame_path = self.project_root / "storage" / "processed" / "video" / asset_name / "frames" / f"frame_{ts}.jpg"
+        frame_path = self.project_root / "storage" / "processed" / "video" / asset_name / "frames" / f"time_{ts}.jpg"
         
         strategy_key = state["task_manifest"].get("vision_strategy", "scene_description")
-        vlm_instruction = self.strategies["expert_strategies"]["vision_eye"].get(strategy_key)
+        vlm_instruction = self.strategies.get("expert_strategies", {}).get("vision_eye", {}).get(
+            strategy_key, "Please describe the visual content of this frame."
+        )
 
         if frame_path.exists():
             vlm_params = {
@@ -161,8 +237,8 @@ class ReasoningStream:
             vlm_res = await asyncio.to_thread(self.tools.call_reasoning_eye, vlm_params)
             
             return {
-                "vlm_feedback": vlm_res.get("description", "Vision parse failed."),
-                "reasoning_chain": state["reasoning_chain"] + [f"VLM analyzed frame at {ts}s using {strategy_key} strategy."]
+                "vlm_feedback": vlm_res.get("response", "Vision parse failed."),
+                "reasoning_chain": state["reasoning_chain"] + [f"Node: vision_eye | Analyzed frame at {ts}s using {strategy_key} strategy."]
             }
         return {"vlm_feedback": "Frame not found."}
 
@@ -195,9 +271,11 @@ class ReasoningStream:
         
         synth_prompt = self.prompt_manager.render(
             "synthesizer",
+            query=state["query"],
             docs=state["retrieved_docs"],
             vlm_feedback=state.get("vlm_feedback"),
-            math_res=state.get("verification_results")
+            math_res=state.get("verification_results"),
+            eval_report=state.get("eval_report") 
         )
         
         final_answer = await self._deepseek_call(synth_prompt)
@@ -212,10 +290,11 @@ class ReasoningStream:
         }
 
     def _build_workflow(self,saver):
-        """Assembles the LangGraph state machine with conditional routing."""
+        """Assembles the LangGraph state machine with Reflective Retrieval Loop."""
         workflow = StateGraph(AgentState)
 
         workflow.add_node("research", self.research_node)
+        workflow.add_node("evaluate", self.evaluate_node)
         workflow.add_node("vision_eye", self.vision_node)
         workflow.add_node("verify", self.logic_node)
         workflow.add_node("synthesize", self.synthesize_node)
@@ -224,10 +303,22 @@ class ReasoningStream:
         
         def route_after_research(state: AgentState):
             if state.get("status") == "error": return END
-            # Check manifest for vision requirement
-            return "vision_eye" if state["task_manifest"].get("need_vision") else "verify"
+            return "evaluate"
+
+        def route_after_evaluate(state: AgentState):
+            report = state.get("eval_report", {})
+            action = report.get("action")
+            
+            if action == "refetch" and state.get("retry_count", 0) < 2:
+                logger.warning("🔄 Evidence insufficient, triggering refetch...")
+                return "research"
+            
+            if state["task_manifest"].get("need_vision"):
+                return "vision_eye"
+            return "verify"
         
         workflow.add_conditional_edges("research", route_after_research)
+        workflow.add_conditional_edges("evaluate", route_after_evaluate)
         workflow.add_edge("vision_eye", "verify")
         workflow.add_edge("verify", "synthesize")
         workflow.add_edge("synthesize", END)
@@ -250,7 +341,8 @@ class ReasoningStream:
                     "query": query, "retrieved_docs": [], "verification_results": "",
                     "vlm_feedback": "", "reasoning_chain": [f"Init: {query}"],
                     "final_answer": "", "citations": [], "status": "started",
-                    "task_manifest": {}, "has_video": False, "graph_data": {}
+                    "task_manifest": {}, "has_video": False, "graph_data": {},
+                    "eval_report": {}, "retry_count": 0
                 }
                 return await app.ainvoke(inputs, config=config)
         finally:

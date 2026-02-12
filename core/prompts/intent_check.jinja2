@@ -1,18 +1,19 @@
-## 意图识别指令
-你是一个学术意图分析专家。请根据用户的【原始问题】和【检索到的材料摘要】，决定后续推理流程。
+{# core/prompts/intent_check.jinja2 #}
+## 意图与工具路由指令
+你正在决定一个学术问题的后续处理路径。
 
-### 输入信息
-* **原始问题**: {{ query }}
-* **材料摘要**: 
-{% for doc in docs %}
-  - [{{ doc.modality }}] {{ doc.content[:100] }}...
-{% endfor %}
+### 当前上下文
+* **问题**: {{ query }}
+* **已获证据片段**: {{ docs[:2] }} (仅摘要)
 
-### 任务要求
-请判断并输出 JSON 格式（严禁包含任何说明文字）：
+### 路由逻辑
+1. **Sandbox 触发**：若问题包含“解方程”、“计算数值”、“验证等式”，必须设为 true。
+2. **Vision 触发**：若证据包含 PDF 中的复杂图表或视频帧，且文字描述不足以支撑解法，设为 true。
+
+### 输出 JSON：
 {
   "need_vision": {{ "true" if any_video else "false" }},
-  "need_sandbox": "根据问题是否涉及复杂计算或公式推导判断",
-  "vision_strategy": "如果需要视觉，请从 [math_derivation, scene_description, graph_analysis] 中选择一个",
-  "reasoning_focus": "一句话描述后续需要关注的核心逻辑点"
+  "need_sandbox": true/false,
+  "vision_strategy": "必选其一: math_derivation, scene_description, graph_analysis",
+  "reasoning_focus": "一句话说明 LLM 接下来要解决的最核心学术点（如：验证阻尼系数对通解形式的影响）"
 }

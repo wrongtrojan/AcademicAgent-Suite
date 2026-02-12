@@ -88,7 +88,7 @@ class VideoSlicer:
             
             timestamp = i / fps
             if not any(abs(float(f.stem.split('_')[1]) - timestamp) < 1.5 for f in frame_dir.glob("time_*.jpg")):
-                save_path = frame_dir / f"uniform_{timestamp:.2f}.jpg"
+                save_path = frame_dir / f"time_{timestamp:.2f}.jpg"
                 cv2.imwrite(str(save_path), frame)
                 saved_count += 1
             

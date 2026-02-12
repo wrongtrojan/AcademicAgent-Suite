@@ -1,83 +1,47 @@
 import asyncio
 import logging
 import os
-import redis.asyncio as redis # 使用异步 Redis 客户端对齐 AsyncRedisSaver
-from pathlib import Path
+import redis.asyncio as redis
 from core.reasoning_stream import ReasoningStream
 from core.tools_manager import ToolsManager
-from core.system_state import SystemStateManager
 
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - [BATTLE-TEST] - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("RealEngineTest")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [QA-AUDIT] - %(levelname)s - %(message)s')
+logger = logging.getLogger("AdvancedTest")
 
-async def run_connectivity_test():
+async def run_reflective_test():
     tools = ToolsManager()
     reasoner = ReasoningStream(tools)
     
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    try:
-        r = redis.from_url(redis_url)
-        await r.ping()
-        logger.info(f"✅ Redis Physical Connection: OK ({redis_url})")
-        await r.close()
-    except Exception as e:
-        logger.error(f"❌ Redis Connection Failed: {e}. Ensure docker container is running.")
-        return
+    # 强制引导到视频资产的测试用例
+    # 建议选取一个你确定库里有的视频名称
+    test_query = "在视频 496 秒左右，屏幕上写了什么？"
+    thread_id = "vlm_stress_test_002" 
 
-    test_query = "你能不能告诉我pdf第一面例题2.1的解决方法"
-    thread_id = "test_session_001_real" 
-
-    logger.info(f"🧠 Starting Real-World Reasoning Test. Thread: {thread_id}")
+    logger.info("🚀 STARTING VLM-FOCUSED TEST...")
 
     try:
         result = await reasoner.execute_query(test_query, thread_id=thread_id)
-    except Exception as e:
-        logger.error(f"❌ Execution crashed: {str(e)}")
-        return
-
-    logger.info("--- 🛡️ Physical Connectivity Audit ---")
-
-    if result.get("status") == "completed":
-        logger.info("✅ Workflow Logic: COMPLETED")
-    else:
-        logger.error(f"❌ Workflow Logic: {result.get('status')} (Msg: {result.get('message', 'N/A')})")
-
-    citations = result.get("citations", [])
-    pdf_cites = [c for c in citations if c["type"] == "pdf"]
-    if pdf_cites and all("bbox" in c and c["bbox"] for c in pdf_cites):
-        logger.info(f"✅ BBox Data Link: SUCCESS (Found {len(pdf_cites)} coordinates)")
-    else:
-        logger.warning("⚠️ BBox Data Link: EMPTY (Metadata might missing coordinates in Milvus)")
-
-    vlm_feedback = result.get("vlm_feedback", "")
-    if vlm_feedback and "skipped" not in result.get("status", ""):
-        logger.info(f"✅ VLM Execution: SUCCESS (Output: {vlm_feedback[:50]}...)")
-    else:
-        logger.warning("⚠️ VLM Execution: SKIPPED or FAILED (Check frame path or intent_check)")
-
-    logic_res = result.get("verification_results", "")
-    if "Verified:" in logic_res:
-        logger.info(f"✅ Sandbox Execution: SUCCESS (Result: {logic_res})")
-    else:
-        logger.warning("⚠️ Sandbox Execution: NO FORMULA VERIFIED")
-
-    from langgraph.checkpoint.redis import AsyncRedisSaver
-    async with AsyncRedisSaver.from_conn_string(redis_url) as saver:
-        checkpoint = await saver.aget({"configurable": {"thread_id": thread_id}})
-        if checkpoint:
-            logger.info("✅ Redis Checkpointer: SUCCESS (State persisted)")
+        
+        # 核心观察点：Node 路由
+        chain = result.get("reasoning_chain", [])
+        has_vlm = any("vision_eye" in str(s).lower() or "视觉" in str(s) for s in chain)
+        
+        if has_vlm:
+            logger.info("✅ SUCCESS: VLM Node (vision_eye) was TRIPPED.")
+            logger.info(f"📸 VLM Output Snippet: {result.get('vlm_feedback')}")
         else:
-            logger.error("❌ Redis Checkpointer: FAILED (No checkpoint found)")
-    
-    logger.info("="*50)
-    logger.info("🎓 DEEPSEEK FINAL ACADEMIC ANSWER:")
-    print(result.get("final_answer")) 
-    logger.info("="*50)
+            logger.warning("❌ FAILURE: VLM Node was BYPASSED.")
+            # 进一步诊断：看看检索到了什么
+            docs = result.get("retrieved_docs", [])
+            video_docs = [d for d in docs if d['metadata'].get('modality') == 'video']
+            logger.info(f"📊 Debug Info: Retrieved {len(video_docs)} video chunks.")
+            
+        # 检查是否因为 intent_check 判定不需要视觉
+        if not result.get("has_video") and video_docs:
+            logger.error("⚠️ CRITICAL: Video docs exist but 'has_video' flag is False. Check intent_check logic.")
 
-    logger.info("--- End of Audit ---")
+    except Exception as e:
+        logger.error(f"💥 Test Crashed: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(run_connectivity_test())
+    asyncio.run(run_reflective_test())

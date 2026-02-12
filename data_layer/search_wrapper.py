@@ -1,6 +1,5 @@
 import sys
 import json
-import torch 
 from vector_search import AcademicSearcher
 
 def main():
@@ -10,12 +9,12 @@ def main():
 
     params = json.loads(sys.argv[1])
     query = params.get("query")
-    asset_id = params.get("asset_id")
     top_k = params.get("top_k", 5)
+    preferences = params.get("preferences")
 
     try:
         searcher = AcademicSearcher()
-        results = searcher.search(query=query, asset_id=asset_id, top_k=top_k)
+        results = searcher.search(query=query, top_k=top_k, preferences=preferences)
         print(json.dumps(results))
     except Exception as e:
         print(json.dumps({"status": "error", "message": str(e)}))

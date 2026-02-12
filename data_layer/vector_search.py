@@ -2,7 +2,7 @@ import torch
 import yaml
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pymilvus import connections, Collection
 from transformers import CLIPProcessor, CLIPModel
 
@@ -50,46 +50,67 @@ class AcademicSearcher:
             # Convert to flat list of floats for Milvus serialization
             return text_features.cpu().numpy()[0].tolist()
 
-    def search(self, query: str, asset_id: str = None, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, preferences: Optional[Dict] = None, top_k: int = 10) -> List[Dict[str, Any]]:
         """
-        Refined search logic: Combining your original architecture with 
-        enhanced academic reranking and structured metadata.
+        Soft-scoring search: Retrieve broader candidates and apply weight boosts based on metadata.
+        :param preferences: Dict containing boost targets (e.g., {'asset_name': 'math', 'target_page': 1})
         """
-        # 1. Get query vector using your robust internal method
         query_vector = self._encode_query(query)
-        
         search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
-        expr = f'asset_name == "{asset_id}"' if asset_id else None
-
-        # 2. Milvus Execution
-        results = self.collection.search(
+        
+        # Broad retrieval without hard filters
+        candidates = self.collection.search(
             data=[query_vector],
             anns_field="vector", 
             param=search_params,
-            limit=top_k * 2,  # Over-fetch for reranking
-            expr=expr,
+            limit=top_k * 5,  
             output_fields=["asset_name", "modality", "content_type", "content_ref", "coordinates", "timestamp"]
         )
 
         formatted_results = []
         query_lower = query.lower()
+        
 
-        for hit in results[0]:
-            content = hit.entity.get("content_ref") or ""
-            score = hit.score
-            modality = hit.entity.get("modality")
-
-            # 3. Enhanced Academic Reranking (Local Consensus)
-            # Boost if exact keyword is found in the text slice
-            if query_lower in content.lower():
-                score += 0.15 
+        for hit in candidates[0]:
+            base_score = float(hit.score)
+            bonus = 0.0
             
-            # Prefer transcripts for textual queries to ensure citation accuracy
-            if modality == "video" and hit.entity.get("content_type") == "transcript_context":
-                score += 0.05
+            entity = hit.entity
+            asset_name = entity.get("asset_name")
+            modality = entity.get("modality")
+            timestamp = entity.get("timestamp")
+            content = entity.get("content_ref") or ""
+
+            if preferences:
+                # A. Sequential Match logic
+                pref_asset = preferences.get("asset_name")
+                if pref_asset and pref_asset.lower() in asset_name.lower():
+                    bonus += 0.35  
+                
+                # B. 
+                pref_mod = preferences.get("modality")
+                if pref_mod and pref_mod == modality:
+                    bonus += 0.15
+                
+                # C. Page/Timestamp
+                pref_time = preferences.get("timestamp")
+                if pref_time is not None:
+                    try:
+                        if abs(float(timestamp) - float(pref_time)) < 0.1:
+                            bonus += 0.40  
+                    except: pass
+
+            # D.Academic heuristics
+            if query_lower in content.lower(): 
+                bonus += 0.10
+            if modality == "video" and entity.get("content_type") == "transcript_context":
+                bonus += 0.05
+
+            final_score = base_score + bonus
 
             formatted_results.append({
-                "score": round(float(score), 4),
+                "score": round(float(final_score), 4),
+                "base_vector_score": round(base_score, 4),
                 "content": content,
                 "metadata": {
                     "asset_id": hit.entity.get("asset_name"),
@@ -107,16 +128,3 @@ class AcademicSearcher:
     
 if __name__ == "__main__":
     searcher = AcademicSearcher()
-    # Testing with query "DDL"
-    res = searcher.search("重根", top_k=10)
-    print(res)
-    for r in res:
-        # Accessing nested metadata fields
-        m = r['metadata']
-        modality = m['modality']
-        content = r['content'][:50].replace('\n', ' ')
-        
-        # Displaying with anchors
-        anchor = f"Time: {m['timestamp']}" if modality == 'video' else f"Page: {m['page_label']}"
-        
-        print(f"[{modality.upper()}] Score: {r['score']:.4f} | {anchor} | Content: {content}...")

@@ -1,15 +1,21 @@
 expert_strategies:
   vision_eye:
-    math_derivation: "专注于提取黑板上的推导步骤，识别变量间的等量关系"
-    scene_description: "描述视频中的物理实验器材、演示过程或手写草稿"
-    graph_analysis: "识别坐标轴、曲线趋势及关键数据点的数值"
+    scene_description: "请详细描述画面中的视觉信息，包括黑板上的文字和公式。"
+    math_derivation: "请识别并提取画面中正在推导的数学公式。"
+    graph_analysis: "请分析画面中的图表、坐标轴及曲线趋势。"
   
   sandbox:
     precision: 4
     timeout: 5.0
-    allowed_modules: ["sympy", "numpy", "math"]
+    allowed_modules: ["sympy", "numpy", "math", "scipy"]
+
+retrieval_preferences:
+  page_match_bonus: 0.6  
+  asset_match_bonus: 0.4 
+  min_relevance_threshold: 0.55 
 
 output_preferences:
   language: "zh-CN"
   citation_style: "academic_bracket"
   pruning_level: "high"
+  show_thinking_process: true 

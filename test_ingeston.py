@@ -24,7 +24,7 @@ async def run_hybrid_orchestration_test():
     await asyncio.sleep(2) 
     logger.info("🛡️ PHASE 2: Testing VRAM guard during heavy 'all' mode ingestion...")
     collision_query = "What is the Wronski determinant?"
-    intercepted_res = await reasoner.execute_query(collision_query)
+    intercepted_res = await reasoner.execute_query(collision_query, thread_id="collision_test_001")
     
     if intercepted_res.get("status") == "error":
         logger.info(f"✅ Confirmed: Reasoning stream intercepted. Message: {intercepted_res.get('message')}")
@@ -35,8 +35,8 @@ async def run_hybrid_orchestration_test():
     logger.info("🧠 PHASE 4: Testing hybrid reasoning (PDF + Video)...")
     complex_query = "Based on the text and video, explain the solution for a second-order linear differential equation with constant coefficients."
     
-    final_output = await reasoner.execute_query(complex_query)
-
+    final_output= await reasoner.execute_query(complex_query, thread_id="hybrid_reasoning_001")
+    
     logger.info("--- Final Orchestration Audit ---")
     logger.info(f"Status: {final_output.get('status')}")
     logger.info(f"Evidence Anchors: {final_output.get('citations')}")
