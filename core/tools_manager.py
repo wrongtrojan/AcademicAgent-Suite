@@ -114,6 +114,19 @@ class ToolsManager:
         """Final Step: DataStreamOrchestrator for vectorization."""
         logger.info(f"🚀 [Data Pipeline] Launching manager...")
         return self._dispatch_subprocess("data_layer", "data_layer/data_wrapper.py", params)
+    
+    def call_messenger_come(self):
+        params = {"mode": "come"}
+        return self._dispatch_subprocess("data_layer", "data_layer/messenger_wrapper.py", params)
+
+    def call_messenger_back(self, asset_id: str, asset_type: str, content: dict):
+        params = {
+            "mode": "back", 
+            "asset_id": asset_id, 
+            "asset_type": asset_type, 
+            "content": content
+        }
+        return self._dispatch_subprocess("data_layer", "data_layer/messenger_wrapper.py", params)
 
     def call_searcher(self, params: dict):
         """Querying: Vector search across Milvus indices."""
@@ -154,3 +167,5 @@ class ToolsManager:
             "sandbox", "services/sandbox/sandbox_wrapper.py", params,
             task_type=SystemStatus.QUERYING
         )
+        
+    

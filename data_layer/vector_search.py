@@ -113,7 +113,7 @@ class AcademicSearcher:
                 "base_vector_score": round(base_score, 4),
                 "content": content,
                 "metadata": {
-                    "asset_id": hit.entity.get("asset_name"),
+                    "asset_name": hit.entity.get("asset_name"),
                     "modality": modality,
                     "type": hit.entity.get("content_type"),
                     "bbox": hit.entity.get("coordinates") ,

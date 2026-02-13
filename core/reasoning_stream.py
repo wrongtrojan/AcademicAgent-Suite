@@ -143,7 +143,7 @@ class ReasoningStream:
                 meta = doc.get("metadata", {})
                 modality = meta.get("modality")
                 
-                cite_item = {"type": modality, "asset_id": meta.get("asset_name")}
+                cite_item = {"type": modality, "asset_name": meta.get("asset_name")}
                 if modality == "video":
                     has_video = True
                     ts = float(meta.get("timestamp", 0))
@@ -218,7 +218,7 @@ class ReasoningStream:
         video_docs = [d for d in state["retrieved_docs"] if d.get("metadata", {}).get("modality") == "video"]
         
         top_video = video_docs[0]
-        asset_name = top_video["metadata"].get("asset_id")
+        asset_name = top_video["metadata"].get("asset_name")
         ts = (top_video["metadata"].get("timestamp", 0))
         
         # Path aligned with your provided structure

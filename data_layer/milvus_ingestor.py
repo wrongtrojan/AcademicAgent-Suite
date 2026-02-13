@@ -1,4 +1,3 @@
-import os
 import json
 import yaml
 import logging
@@ -208,7 +207,7 @@ class UnifiedIngestor:
         logger.info("✨ Data synchronization and MinIO mapping completed successfully")
 
 if __name__ == "__main__":
-    ingestor = UnifiedIngestor(force_reset=True)
+    ingestor = UnifiedIngestor(force_reset=False)
     ingestor.ingest_pdf_data()
     ingestor.ingest_video_data()
     ingestor.finish()

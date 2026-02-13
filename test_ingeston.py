@@ -1,46 +1,57 @@
 import asyncio
 import logging
+import sys
+from pathlib import Path
+
+# 将项目根目录添加到系统路径，确保能导入 core 和 data_layer
+root_path = Path(__file__).resolve().parent.parent
+sys.path.append(str(root_path))
+
 from core.ingestion_stream import IngestionStream
-from core.reasoning_stream import ReasoningStream
 from core.tools_manager import ToolsManager
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [STREAM-TEST] - %(levelname)s - %(message)s')
-logger = logging.getLogger("HybridTest")
+# 配置日志输出格式，与 IngestionStream 的符号系统对齐
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - [%(name)s] - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger("TestLauncher")
 
-async def run_hybrid_orchestration_test():
+async def run_final_ingestion_test():
+    """
+    [Final Verification] 测试 ID 无感化的全量同步流程
+    """
+    logger.info("🧪 [Test] Starting Final Orchestration Test (ID-Agnostic)...")
+    
+    # 1. 初始化组件
+    # 注意：ToolsManager 内部会通过 Python 调用各个 Wrapper
     tools = ToolsManager()
     ingestor = IngestionStream(tools)
-    reasoner = ReasoningStream(tools)
 
-    hybrid_params = {
-        "asset_id": "math_analysis_chap4",
-        "pdf_id": "math_analysis_pdf",
-        "video_id": "differential_eq_video"
-    }
+    logger.info("📡 [Test] Triggering Global Sync. No asset_id needed.")
     
-    logger.info("🚀 PHASE 1: Launching 'ALL' mode ingestion stream...")
-    ingest_task = asyncio.create_task(ingestor.run_pipeline(asset_type="all", params=hybrid_params))
+    try:
+        # 2. 执行核心同步逻辑
+        # 该操作会依次：
+        #   - 扫描并解析 PDF/视频 (生数据入库)
+        #   - 巡检 messenger 获取增量列表
+        #   - 调 DeepSeek 生成 JSON 大纲
+        #   - 回传归档至各自的 summary_outline.json
+        await ingestor.run_global_sync()
+        
+        logger.info("🏁 [Test] Global Sync call finished.")
+        
+        # 3. 验证建议 (人工核查)
+        logger.info("-" * 50)
+        logger.info("🔍 [Audit Suggestion] Please check the following locations for outputs:")
+        logger.info(f"1. Video Outlines: storage/processed/video/*/summary_outline.json")
+        logger.info(f"2. PDF Outlines:   storage/processed/magic-pdf/*/summary_outline.json")
+        logger.info("-" * 50)
 
-    await asyncio.sleep(2) 
-    logger.info("🛡️ PHASE 2: Testing VRAM guard during heavy 'all' mode ingestion...")
-    collision_query = "What is the Wronski determinant?"
-    intercepted_res = await reasoner.execute_query(collision_query, thread_id="collision_test_001")
-    
-    if intercepted_res.get("status") == "error":
-        logger.info(f"✅ Confirmed: Reasoning stream intercepted. Message: {intercepted_res.get('message')}")
-
-    await ingest_task
-    logger.info("✅ PHASE 3: Ingestion stream finished. Lock released.")
-
-    logger.info("🧠 PHASE 4: Testing hybrid reasoning (PDF + Video)...")
-    complex_query = "Based on the text and video, explain the solution for a second-order linear differential equation with constant coefficients."
-    
-    final_output= await reasoner.execute_query(complex_query, thread_id="hybrid_reasoning_001")
-    
-    logger.info("--- Final Orchestration Audit ---")
-    logger.info(f"Status: {final_output.get('status')}")
-    logger.info(f"Evidence Anchors: {final_output.get('citations')}")
-    logger.info(f"Reasoning Chain: {final_output.get('reasoning_chain')}")
+    except Exception as e:
+        logger.error(f"❌ [Test Failure] Something went wrong: {str(e)}")
 
 if __name__ == "__main__":
-    asyncio.run(run_hybrid_orchestration_test())
+    # 确保在异步环境下运行
+    asyncio.run(run_final_ingestion_test())
