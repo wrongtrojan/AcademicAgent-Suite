@@ -1,161 +1,171 @@
-import asyncio
-import json
 import os
+import sys
+import json
 import yaml
+import httpx
+import asyncio
+import dotenv
 import traceback
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any
-from core.assets_manager import AcademicAsset
+
+# 加载环境变量
+dotenv.load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
+
+from core.assets_manager import AcademicAsset, AssetType
+from core.prompts_manager import PromptManager
 
 # --- 基础日志函数 ---
-LOG_DIR = Path("logs")
+LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_FILE_PATH = LOG_DIR / "services.log"
+log_file_path = LOG_DIR / "structure_generate.log"
 
-def log_message(level: str, msg: str):
-    """
-    基础日志重定向：同时打印到控制台并追加到 services.log
-    """
+def log_message(level, msg):
+    """最基础的日志重定向：同时打印到控制台并追加到文件"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    formatted_msg = f"{timestamp} - [ServicesManager] - {level} - {msg}"
+    formatted_msg = f"{timestamp} - [StructureGen] - {level} - {msg}"
     
     # 输出到控制台
     print(formatted_msg)
     
     # 追加到文件
-    try:
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(formatted_msg + "\n")
-    except Exception as e:
-        print(f"CRITICAL: Failed to write log to file: {e}")
+    with open(log_file_path, "a", encoding="utf-8") as f:
+        f.write(formatted_msg + "\n")
 
-class ServicesManager:
-    def __init__(self, config_path="configs/model_config.yaml"):
-        """
-        初始化多环境网关
-        """
-        self.project_root = Path(__file__).resolve().parent.parent
-        full_config_path = self.project_root / config_path
+class StructureGenerator:
+    def __init__(self, global_cfg_path="configs/model_config.yaml"):
+        self.project_root = PROJECT_ROOT
         
-        if not full_config_path.exists():
-            log_message("ERROR", f"Config file not found: {full_config_path}")
-            raise FileNotFoundError(f"Config file not found: {full_config_path}")
-
-        with open(full_config_path, 'r', encoding='utf-8') as f:
+        # 加载配置
+        config_path = self.project_root / global_cfg_path
+        if not config_path.exists():
+            log_message("ERROR", f"Config file not found: {config_path}")
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+            
+        with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
+            
+        # 初始化 Prompt Manager
+        self.prompt_manager = PromptManager()
         
-        self.envs = self.config.get('environments', {})
-        self.wrapper_dir = self.project_root / "services" / "wrappers"
-        log_message("INFO", "ServicesManager initialized successfully.")
+        # API 配置
+        llm_cfg = self.config.get("llm", {})
+        self.api_url = llm_cfg.get("api_url", "https://api.deepseek.com/v1/chat/completions")
+        self.api_key = os.getenv("DEEPSEEK_API_KEY")
 
-    async def _dispatch_async(self, env_key: str, script_name: str, asset: Optional[AcademicAsset] = None, params: Optional[Dict] = None, timeout: int = 3600) -> Dict[str, Any]:
-        """
-        核心异步分派逻辑：启动子进程，等待并解析返回的 JSON 结果
-        """
-        python_exe = self.envs.get(env_key)
-        script_path = self.wrapper_dir / script_name
-
-        if not python_exe or not os.path.exists(python_exe):
-            err_msg = f"Python interpreter not found for env: {env_key}"
-            log_message("ERROR", err_msg)
-            return {"status": "error", "message": err_msg}
+    def _extract_context(self, asset: AcademicAsset) -> str:
+        """从处理后的文件中提取文本内容作为 LLM 上下文"""
+        processed_root = Path(self.config['paths']['processed_storage'])
         
-        if not script_path.exists():
-            err_msg = f"Wrapper script not found: {script_name}"
-            log_message("ERROR", err_msg)
-            return {"status": "error", "message": err_msg}
-
-        # 准备子进程环境变量
-        current_env = os.environ.copy()
-        venv_bin = str(Path(python_exe).parent)
-        current_env["PATH"] = f"{venv_bin}{os.pathsep}{current_env.get('PATH', '')}"
-        current_env["PYTHONUNBUFFERED"] = "1"
-        
-        # 准备输入参数
-        input_data = {}
-        asset_id_str = "N/A"
-        if asset:
-            input_data = asset.to_dict()
-            asset_id_str = asset.asset_id
-        if params:
-            input_data.update(params)
-        
-        input_str = json.dumps(input_data)
-
-        log_message("INFO", f"Dispatching: [{env_key}] -> {script_name} (Asset: {asset_id_str})")
-
         try:
-            # 启动异步子进程
-            process = await asyncio.create_subprocess_exec(
-                python_exe, "-u", str(script_path), input_str,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.project_root),
-                env=current_env
+            if asset.asset_type == AssetType.PDF:
+                clean_id = asset.asset_id.replace(".pdf", "")
+                base_path = processed_root / "magic-pdf" / clean_id
+                middle_files = base_path / "ocr" / f"{clean_id}_middle.json"
+                if not middle_files.exists():
+                    raise FileNotFoundError(f"Missing processed PDF content (middle.json) for {asset.asset_id}")
+                
+                with open(middle_files, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                content_to_send = data.get("pdf_info", data)
+                return json.dumps(content_to_send, ensure_ascii=False)[:15000] 
+
+            elif asset.asset_type == AssetType.VIDEO:
+                transcript_path = processed_root / "video" / asset.asset_id / "transcript.json"
+                if not transcript_path.exists():
+                    raise FileNotFoundError(f"Missing transcript for video {asset.asset_id}")
+                
+                with open(transcript_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    segments = data.get("segments", [])
+                    return "\n".join([f"[{s['start']}s]: {s['text']}" for s in segments])[:10000]
+        except Exception as e:
+            log_message("ERROR", f"Context extraction failed for {asset.asset_id}: {str(e)}")
+            raise
+
+        return ""
+
+    async def generate_outline(self, asset: AcademicAsset):
+        """渲染 Prompt 并调用 DeepSeek API"""
+        log_message("INFO", f"Starting structure generation for asset: {asset.asset_id}")
+        
+        try:
+            context = self._extract_context(asset)
+            
+            # 渲染 Prompt
+            prompt = self.prompt_manager.render(
+                "structural_outline", 
+                raw_context=context, 
+                asset_type=asset.asset_type.value
             )
 
-            try:
-                # 等待任务完成
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                process.kill()
-                log_message("ERROR", f"Task timeout ({timeout}s) for {script_name}")
-                return {"status": "error", "message": f"Task timed out after {timeout}s", "asset_id": asset_id_str}
-
-            # 解码输出
-            out_str = stdout.decode().strip()
-            err_str = stderr.decode().strip()
-
-            if process.returncode != 0:
-                log_message("ERROR", f"Task failed [Exit {process.returncode}] in {script_name}: {err_str}")
-                return {
-                    "status": "error", 
-                    "exit_code": process.returncode, 
-                    "message": err_str,
-                    "asset_id": asset_id_str
+            log_message("INFO", f"Sending request to DeepSeek for asset: {asset.asset_id}")
+            
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    self.api_url,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={
+                        "model": "deepseek-chat",
+                        "messages": [
+                            {"role": "system", "content": "You are a professional academic assistant. Return results in JSON format."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "response_format": {"type": "json_object"}
+                    }
+                )
+                response.raise_for_status()
+                res_data = response.json()
+                outline_content = json.loads(res_data['choices'][0]['message']['content'])
+                
+                # 确定保存路径
+                processed_root = Path(self.config['paths']['processed_storage'])
+                if asset.asset_type == AssetType.PDF:
+                    clean_id = asset.asset_id.replace(".pdf", "")
+                    save_dir = processed_root / "magic-pdf" / clean_id
+                else:
+                    save_dir = processed_root / "video" / asset.asset_id
+                save_dir.mkdir(parents=True, exist_ok=True)
+                save_path = save_dir / "summary_outline.json"
+                
+                result_payload = {
+                    "asset_id": asset.asset_id,
+                    "generated_at": datetime.now().isoformat(),
+                    "outline": outline_content
                 }
-
-            # 解析最后一行 JSON
-            try:
-                last_line = out_str.splitlines()[-1] if out_str else "{}"
-                result = json.loads(last_line)
-                log_message("INFO", f"Task success: {script_name}")
-                return result
-            except (json.JSONDecodeError, IndexError):
-                log_message("WARNING", f"Task {script_name} finished but output was not JSON. Raw: {out_str[:100]}...")
+                
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    json.dump(result_payload, f, ensure_ascii=False, indent=4)
+                
+                log_message("INFO", f"Successfully generated outline for {asset.asset_id}. Saved to: {save_path}")
                 return {
-                    "status": "partial_success", 
-                    "raw_output": out_str, 
-                    "message": "Task finished but output was not valid JSON"
+                    "status": "success",
+                    "save_path": str(save_path),
+                    "asset_id": asset.asset_id
                 }
 
         except Exception as e:
-            log_message("ERROR", f"Unexpected error during dispatch: {str(e)}")
-            log_message("DEBUG", traceback.format_exc()) # 记录详细堆栈
-            return {"status": "error", "message": str(e)}
+            log_message("ERROR", f"DeepSeek call or processing failed for {asset.asset_id}: {str(e)}")
+            log_message("DEBUG", traceback.format_exc())
+            return {"status": "error", "message": str(e), "asset_id": asset.asset_id}
 
-    # --- 异步服务接口 (保持不变) ---
+async def run_structure_generate(asset: AcademicAsset):
+    """外部调用的异步包装器"""
+    generator = StructureGenerator()
+    return await generator.generate_outline(asset)
 
-    async def start_pdf_recognition(self, asset: AcademicAsset):
-        return await self._dispatch_async("doc_recognize", "pdf_recognize.py", asset=asset)
-
-    async def start_video_recognition(self, asset: AcademicAsset):
-        return await self._dispatch_async("video_recognize", "video_recognize.py", asset=asset)
-
-    async def start_clip_indexing(self, asset: AcademicAsset):
-        return await self._dispatch_async("data_stream", "clip_work.py", asset=asset)
-
-    async def start_milvus_ingestion(self, asset: AcademicAsset):
-        return await self._dispatch_async("data_stream", "milvus_ingest.py", asset=asset)
-
-    async def start_structure_generation(self, asset: AcademicAsset):
-        return await self._dispatch_async("agent_logic", "structure_generate.py", asset=asset)
-
-    async def call_visual_expert(self, image_path: str, prompt: str):
-        params = {"image": image_path, "prompt": prompt}
-        return await self._dispatch_async("visual_inference", "visual_inference.py", params=params)
-    
-    async def call_sandbox_expert(self, image_path: str, prompt: str):
-        params = {"image": image_path, "prompt": prompt}
-        return await self._dispatch_async("sandbox_inference", "sandbox_inference.py", params=params)
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        try:
+            asset_data = json.loads(sys.argv[1])
+            asset_obj = AcademicAsset.from_dict(asset_data)
+            
+            result = asyncio.run(run_structure_generate(asset_obj))
+            print(json.dumps(result))
+        except Exception as e:
+            log_message("ERROR", f"CLI execution error: {str(e)}")
+            print(json.dumps({"status": "error", "message": f"CLI execution error: {str(e)}"}))

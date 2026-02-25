@@ -229,8 +229,13 @@ class GlobalAssetManager:
                 res = {"status": "success"}
 
             if res.get("status") == "success":
-                if "processed_path" in res:
-                    asset_dict["asset_processed_path"] = res["processed_path"]
+                path_val = res.get("processed_path")
+                if path_val:
+                    if not str(path_val).startswith("/"):
+                        full_path = (self.storage_root / "processed" / path_val).resolve()
+                        asset_dict["asset_processed_path"] = str(full_path)
+                    else:
+                        asset_dict["asset_processed_path"] = str(path_val)
                 
                 if next_step == AssetStatus.READY:
                     asset_dict["status"] = AssetStatus.READY.value

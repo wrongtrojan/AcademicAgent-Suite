@@ -5,7 +5,7 @@ paths:
 
 environments:
   doc_recognize: "/home/liangqing/AcademicAgent-Suite/envs/DocRecognize/bin/python"
-  video_recognize: "/home/liangqing/miniconda3/envs/VideoRecognize/bin/python"
+  video_recognize: "/home/liangqing/AcademicAgent-Suite/envs/VideoRecognize/bin/python"
   visual_inference: "/home/liangqing/AcademicAgent-Suite/envs/VisualInference/bin/python"
   sandbox_inference: "/home/liangqing/AcademicAgent-Suite/envs/SandboxInference/bin/python"
   data_stream: "/home/liangqing/AcademicAgent-Suite/envs/DataStream/bin/python"

@@ -34,6 +34,8 @@ async def get_structure(asset_id: str):
         }
 
     # 1. 构造文件完整路径
+    if asset["asset_type"]=="pdf":
+        asset["asset_processed_path"] = asset["asset_processed_path"].replace(".pdf","")
     processed_dir = Path(asset["asset_processed_path"])
     outline_file = processed_dir / "summary_outline.json"
 
@@ -62,7 +64,7 @@ async def get_structure(asset_id: str):
 @router.get("/preview")
 async def get_preview(asset_id: str):
     """
-    [API] 申请预览资产的原始或处理后路径
+    [API] 申请预览资产的处理后路径
     """
     asset = manager.get_asset_status(asset_id)
     if not asset:

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 import asyncio
 from enum import Enum
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -124,12 +124,16 @@ class ChatsManager:
 
     # --- 核心方法 ---
 
-    async def _direct_llm_call(self, prompt: str, json_mode: bool = True, stream: bool = False) -> Any:
+    async def _direct_llm_call(self, prompt_or_messages: Union[str, List[Dict]], json_mode: bool = True, stream: bool = False) -> Any:
         """支持流式的 LLM 调用"""
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        if isinstance(prompt_or_messages, str):
+            messages = [{"role": "user", "content": prompt_or_messages}]
+        else:
+            messages = prompt_or_messages
         payload = {
             "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "stream": stream # 新增流式开关
         }
         if json_mode:
@@ -226,28 +230,29 @@ class ChatsManager:
         session = self.active_chats[chat_id]
         
         # 1. 追加新消息到历史
-        session.messages.append(ChatMessage(role="user", message=user_message))
+        history_context = [{"role": m.role, "content": m.message} for m in session.messages[-6:]]
         
-        # 如果是第一条消息，自动更新对话标题
+        # 记录当前用户消息
+        session.messages.append(ChatMessage(role="user", message=user_message))
         if len(session.messages) <= 1:
             session.chat_name = f"Chat-{user_message[:12]}"
 
-        # 构造上下文（将历史消息拼接给 LLM）
-        # 对于学术搜索，我们通常更关注最后一条 query，但需要上下文辅助理解指代（如“那这个公式呢？”）
-        context_query = "\n".join([f"{m.role}: {m.message}" for m in session.messages[-3:]])
+        # 用于搜索阶段的 Query（结合最近几轮对话防止指代不明）
+        search_context_str = "\n".join([f"{m['role']}: {m['content']}" for m in history_context] + [f"user: {user_message}"])
         
         try:
             # 1. Preparing: 结构化需求 (直连)
             session.update_status(ChatStatus.PREPARING)
             self.save_session(chat_id) # 状态变更即持久化
             
-            prep_prompt = self.prompt_manager.render("query_refiner", query=context_query)
+            prep_prompt = self.prompt_manager.render("query_refiner", query=search_context_str)
             # search_needs 已经是符合 {search_params: ..., preferences: ...} 结构的字典
             search_needs = await self._direct_llm_call(prep_prompt)
 
             # 2 & 3. Researching & Evaluating: 搜索循环 (逻辑决策直连)
             session.update_status(ChatStatus.RESEARCHING)
-            while session.retry_count < 3:
+            session.retry_count = 0
+            while session.retry_count < 2:
                 self._log(chat_id, "info", f"Phase 2: Searching (Attempt {session.retry_count+1})...")
                 
                 search_response = await self.services.start_academic_search(search_needs)
@@ -255,7 +260,6 @@ class ChatsManager:
                 # 解析返回结果 (strengthened_search 返回 {"status": "success", "results": [...]})
                 if search_response.get("status") == "success":
                     search_results = search_response.get("results", [])
-                    session.evidence.extend(search_results)
                 else:
                     self._log(chat_id, "error", f"Search failed: {search_response.get('message')}")
                 
@@ -267,7 +271,7 @@ class ChatsManager:
                 session.update_status(ChatStatus.EVALUATING)
                 eval_prompt = self.prompt_manager.render(
                     "evidence_evaluator", 
-                    query=context_query, 
+                    query=search_context_str, 
                     docs=session.evidence,
                     retry_count=session.retry_count # 传入重试次数辅助 LLM 决策
                 )
@@ -283,7 +287,7 @@ class ChatsManager:
             # 4. Strengthening: 意图检查与专家调用 (决策直连)
             session.update_status(ChatStatus.STRENGTHENING)
             self._log(chat_id, "info", "Phase 4: Strengthening via Experts...")
-            intent_prompt = self.prompt_manager.render("intent_check", query=context_query, docs=session.evidence)
+            intent_prompt = self.prompt_manager.render("intent_check", query=search_context_str, docs=session.evidence)
             intent = await self._direct_llm_call(intent_prompt)
             print(f"Intent Check Result: {intent}") # 调试输出
             vlm_res, sandbox_res = "N/A", "N/A"
@@ -301,7 +305,7 @@ class ChatsManager:
                     # 获取策略指令
                     strategy_key = intent.get("vision_strategy", "scene_description")
                     # 注意：这里假设 chats_manager 能访问到 strategies 配置，或者通过 prompt_manager 处理
-                    vlm_instruction = f"Strategy: {strategy_key}. Context: {context_query}" 
+                    vlm_instruction = f"Strategy: {strategy_key}. Context: {search_context_str}" 
 
                     vlm_params = {
                         "image": frame_path,
@@ -332,12 +336,13 @@ class ChatsManager:
             # 渲染最终提示词，注意 docs 此时已包含所有搜索到的 evidence
             final_prompt = self.prompt_manager.render(
                 "synthesizer", 
-                query=context_query, 
+                query=user_message, 
                 docs=session.evidence, 
                 vlm_feedback=vlm_res, 
                 math_res=sandbox_res
             )
-            response_gen = await self._direct_llm_call(final_prompt, json_mode=False, stream=True)
+            full_messages = history_context + [{"role": "user", "content": final_prompt}]
+            response_gen = await self._direct_llm_call(full_messages, json_mode=False, stream=True)
             full_answer = ""
             async for token in response_gen:
                 full_answer += token

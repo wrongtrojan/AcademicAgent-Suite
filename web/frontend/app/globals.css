@@ -29,3 +29,39 @@
 .animate-infinite-scroll {
   animation: infinite-scroll 2s linear infinite;
 }
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;  /* 纵向滚动条宽度 */
+  height: 5px; /* 横向滚动条高度 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent; /* 轨道透明，减少视觉干扰 */
+  margin: 4px; /* 增加边距，防止贴边 */
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  /* 使用渐变色，从评论色过渡到紫色 */
+  background: linear-gradient(to bottom, var(--color-dracula-comment), #4b5a8a);
+  border-radius: 20px;
+  /* 增加一个非常细微的发光效果 */
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+/* 横向滚动时改变渐变方向 */
+.flex-row.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(to right, var(--color-dracula-comment), var(--color-dracula-purple));
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  /* 悬浮时变为明亮的紫色，并增加阴影 */
+  background: var(--color-dracula-purple);
+  box-shadow: 0 0 8px var(--color-dracula-purple);
+}
+
+/* 针对 Firefox 的美化 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-dracula-comment) transparent;
+}
