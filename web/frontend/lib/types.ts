@@ -52,12 +52,24 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface Evidence {
+  content: string;
+  score: number;
+  metadata: {
+    asset_name: string;
+    modality: 'pdf' | 'video';
+    page_label?: number;      // PDF 页码
+    timestamp?: number;        // 视频秒数
+    bbox?: string;             // 重点：后端返回的 "[ymin, xmin, ymax, xmax]" 字符串
+  };
+}
+
 export interface ChatSession {
   chat_id: string;
   chat_name: string;
   status: ChatStatus;
   messages: ChatMessage[];
-  evidence: any[]; // 存储后端返回的搜索证据
+  evidence: Evidence[]; // 存储后端返回的搜索证据
   last_active: string;
 }
 

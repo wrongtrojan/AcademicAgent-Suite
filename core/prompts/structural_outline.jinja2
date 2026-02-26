@@ -5,8 +5,8 @@
 1. **禁止臆造**：大纲内容必须完全来源于 <Context>，严禁生成与素材无关的通用学术常识。
 2. **语言**：必须使用中文。
 3. **锚点映射**：
-   - 视频类资产 (asset_type: video)："anchor" 字段必须填写素材中对应内容的 **秒数 (Seconds)**。
-   - 文档类资产 (asset_type: pdf)："anchor" 字段必须填写素材中对应内容的 **页码 (Page Number)**。
+   - 视频类资产 (asset_type: video)："anchor" 字段必须精准填写素材中对应内容的 **秒数 (Seconds)**。
+   - 文档类资产 (asset_type: pdf)："anchor" 字段必须精准填写素材中对应内容的 **页码 (Page Number)**(注意填写实际页码,为素材中page_idx+1)。
 4. **结构**：大纲必须包含一级标题 (heading) 和二级子要点 (sub_points)。
 
 ### 输入素材 (Context):

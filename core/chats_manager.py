@@ -265,7 +265,7 @@ class ChatsManager:
                 
                 # 确保结果是列表才进行 extend
                 if isinstance(search_results, list):
-                    session.evidence.extend(search_results)
+                    session.evidence = search_results + session.evidence
                 
                 # Evaluating: 判断信息充足性 (直连)
                 session.update_status(ChatStatus.EVALUATING)

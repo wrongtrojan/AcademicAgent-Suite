@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 /* 这里直接定义你的 Dracula 变量 */
 @theme {
@@ -64,4 +65,8 @@
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: var(--color-dracula-comment) transparent;
+}
+
+.prose p {
+  transition: all 0.2s ease-out;
 }

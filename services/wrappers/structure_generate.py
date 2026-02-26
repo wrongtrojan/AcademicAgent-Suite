@@ -64,15 +64,13 @@ class StructureGenerator:
             if asset.asset_type == AssetType.PDF:
                 clean_id = asset.asset_id.replace(".pdf", "")
                 base_path = processed_root / "magic-pdf" / clean_id
-                middle_files = base_path / "ocr" / f"{clean_id}_middle.json"
-                if not middle_files.exists():
+                content_path = base_path / "ocr" / f"{clean_id}_content_list.json"
+                if not content_path.exists():
                     raise FileNotFoundError(f"Missing processed PDF content (middle.json) for {asset.asset_id}")
                 
-                with open(middle_files, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                content_to_send = data.get("pdf_info", data)
-                return json.dumps(content_to_send, ensure_ascii=False)[:15000] 
+                with open(content_path, 'r', encoding='utf-8') as f:
+                    content_to_send = json.load(f)
+                return json.dumps(content_to_send, ensure_ascii=False)[:50000] 
 
             elif asset.asset_type == AssetType.VIDEO:
                 transcript_path = processed_root / "video" / asset.asset_id / "transcript.json"
@@ -82,7 +80,7 @@ class StructureGenerator:
                 with open(transcript_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     segments = data.get("segments", [])
-                    return "\n".join([f"[{s['start']}s]: {s['text']}" for s in segments])[:10000]
+                    return "\n".join([f"[{s['start']}s]: {s['text']}" for s in segments])[:50000]
         except Exception as e:
             log_message("ERROR", f"Context extraction failed for {asset.asset_id}: {str(e)}")
             raise

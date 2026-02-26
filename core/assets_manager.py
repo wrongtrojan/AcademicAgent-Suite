@@ -260,9 +260,6 @@ class GlobalAssetManager:
                     self.assets_map = data["assets_map"]
                 else:
                     self.assets_map = data
-                
-                for aid, a_data in self.assets_map.items():
-                    if a_data["status"] == AssetStatus.RAW.value:
-                        self.pending_queue.put_nowait(aid)
+            
             except Exception as e:
                 logger.error(f"Load state failed: {e}")

@@ -1,9 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { RefreshCw, Upload, Activity, MessageSquare, FileText, PanelLeftClose, PanelLeftOpen, Send, PlayCircle } from 'lucide-react';
-import type { Asset, AssetStatus } from '../lib/types';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
+import { RefreshCw, Upload, Activity, MessageSquare, FileText, PanelLeftClose, PanelLeftOpen, Send, PlayCircle, ListTree, ChevronDown, Plus, Terminal } from 'lucide-react';
+import type { Asset, AssetStatus, ChatSession, ChatMessage, ChatStatus } from '../lib/types';
 import AssetCard from '../components/AssetCard';
+import EvidenceCard from '../components/EvidenceCard';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import PdfViewer from '../components/PdfViewer';
 import { API_ENDPOINTS, BASE_URL } from '../lib/api-config';
+
 
 export default function ScaffoldingPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -15,8 +19,62 @@ export default function ScaffoldingPage() {
   const [activeOutline, setActiveOutline] = useState<any[]>([]);
   const [isLoadingOutline, setIsLoadingOutline] = useState(false);
 
+  // 对话相关状态
+  const [chats, setChats] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [isChatListOpen, setIsChatListOpen] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [inputText, setInputText] = useState("");
+  const [chatStatus, setChatStatus] = useState<ChatStatus>('Idle');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentBbox, setCurrentBbox] = useState<string | undefined>(undefined);
+  
+
   const videoRef = useRef<HTMLVideoElement>(null);
-  const pdfRef = useRef<HTMLIFrameElement>(null);
+  const chatPollingRef = useRef<NodeJS.Timeout | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  
+  const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  // --- 逻辑：获取会话历史 ---
+  const fetchInitialChats = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/v1/status/single_chat`);
+      const result = await res.json();
+      if (result.status === "success") {
+        // 后端返回的是 Map { id: details }
+        const chatList = Object.values(result.data) as ChatSession[];
+        setChats(chatList);
+        if (chatList.length > 0 && !activeChatId) {
+          setActiveChatId(chatList[0].chat_id);
+        }
+      }
+    } catch (e) { console.error("Fetch chats failed", e); }
+  };
+
+  useEffect(() => { fetchInitialChats(); }, []);
+
+  // --- 逻辑：创建新会话 (修正报错 1) ---
+  const createNewChat = async () => {
+    try {
+      const res = await fetch(API_ENDPOINTS.CHAT_CREATE, { method: 'POST' });
+      const data = await res.json();
+      if (data.chat_id) {
+        const newChat: ChatSession = {
+          chat_id: data.chat_id,
+          chat_name: `New Chat ${data.chat_id.slice(-4)}`,
+          status: 'Idle',
+          messages: [],
+          evidence: [],
+          last_active: new Date().toISOString()
+        };
+        setChats(prev => [newChat, ...prev]);
+        setActiveChatId(data.chat_id);
+        setIsChatListOpen(false);
+      }
+    } catch (e) { console.error("Create chat failed", e); }
+  };
 
   // --- 逻辑：获取预览路径 ---
   const fetchPreviewPath = async (assetId: string) => {
@@ -65,6 +123,8 @@ export default function ScaffoldingPage() {
     setSelectedAssetId(id);
     
     if (asset?.status === 'Ready') {
+      setCurrentPage(1);
+      setCurrentBbox(undefined);
       fetchAssetStructure(id); 
       fetchPreviewPath(id);    
     } else {
@@ -76,36 +136,55 @@ export default function ScaffoldingPage() {
 
   // --- 逻辑：跳转功能 ---
   const handleJump = (anchor: number) => {
-  if (!previewData) return;
+    if (!previewData) return;
 
-  if (previewData.type === 'video' && videoRef.current) {
-    videoRef.current.currentTime = anchor;
-    videoRef.current.play().catch(e => console.warn("Auto-play blocked", e));
-  } 
-  else if (previewData.type === 'pdf' && pdfRef.current) {
-    const pageNum = Math.max(1, Math.floor(anchor));
-    
-    // 方案：构造一个带随机参数的 URL 强制浏览器刷新 iframe 内容
-    const url = new URL(previewData.url);
-    
-    // 1. 添加一个随机参数，让浏览器认为资源已改变
-    url.searchParams.set('t', Date.now().toString());
-    
-    // 2. 构造符合 PDF 标准的 Hash 参数
-    // #page=N 是标准，#toolbar=1&navpanes=0 是为了保持 UI 一致
-    const targetSrc = `${url.toString()}#page=${pageNum}&toolbar=1&navpanes=0&view=FitH`;
-    
-    // 3. 执行跳转
-    console.log("PDF Jumping to:", targetSrc);
-    pdfRef.current.src = targetSrc;
+    if (previewData.type === 'video' && videoRef.current) {
+      videoRef.current.currentTime = anchor;
+      videoRef.current.play().catch(e => console.warn("Auto-play blocked", e));
+    } 
+    else if (previewData.type === 'pdf') {
+      const pageNum = Math.max(1, Math.floor(anchor));
+      // 修改点：必须更新状态，PdfViewer 才会响应
+      setCurrentPage(pageNum);
+      setCurrentBbox(undefined); // 大纲跳转通常不带高亮，清空旧高亮
+      console.log("PDF Requesting Page:", pageNum);
+    }
+  };
 
-    // 4. 可选：视觉反馈（闪烁效果）
-    pdfRef.current.style.opacity = '0.7';
-    setTimeout(() => {
-        if(pdfRef.current) pdfRef.current.style.opacity = '1';
-    }, 150);
-  }
-};
+  const handleEvidenceJump = async (assetName: string, anchor: number, bbox?: string) => {
+    const targetAsset = assets.find(a => a.name === assetName);
+    if (!targetAsset) return;
+
+    // --- [修改部位 1: 统一处理资产切换逻辑] ---
+    if (selectedAssetId !== targetAsset.id) {
+      setSelectedAssetId(targetAsset.id);
+      fetchAssetStructure(targetAsset.id); 
+      fetchPreviewPath(targetAsset.id);
+    }
+
+    // --- [修改部位 2: 分类型执行跳转指令] ---
+    if (targetAsset.type === 'video') {
+      // 视频跳转：如果当前已经在播放该视频，直接跳时间；如果是切过来的，需要等 Ref 挂载
+      if (videoRef.current) {
+        videoRef.current.currentTime = anchor;
+        videoRef.current.play().catch(e => console.warn("Auto-play blocked", e));
+      } else {
+        // 这是一个边缘情况：如果切换了资产，video 标签可能还没渲染好
+        // 我们可以通过预设一个临时变量或在 useEffect 中监听 previewData 来处理，
+        // 但最简单严谨的方法是给一个小延迟或依赖现有 videoRef 的可用性
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.currentTime = anchor;
+            videoRef.current.play().catch(e => console.warn("Auto-play blocked", e));
+          }
+        }, 150); // 150ms 足够 React 完成 DOM 节点的初步挂载
+      }
+    } else {
+      // PDF 跳转：保持原有逻辑
+      setCurrentPage(Math.max(1, Math.floor(anchor)));
+      setCurrentBbox(bbox);
+    }
+  };
 
   // --- 强化归一化函数 ---
   const normalizeAsset = useCallback((backendData: any): Asset => {
@@ -173,6 +252,152 @@ export default function ScaffoldingPage() {
     } catch (err) { console.error("Sync trigger failed", err); }
   };
 
+  useLayoutEffect(() => {
+    if (isAtBottomRef.current && isStreaming) {
+      const scrollContainer = chatEndRef.current?.parentElement;
+      if (!scrollContainer) return;
+
+      // 第一帧：立即设置滚动高度，减少视觉闪烁
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+
+      // 第二帧：确保在渲染后再次确认位置
+      const frameId = requestAnimationFrame(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "instant" });
+      });
+      
+      return () => cancelAnimationFrame(frameId);
+    }
+  }, [chats, isStreaming]); // 移除 chatStatus，减少干扰
+
+  useEffect(() => {
+    const container = chatEndRef.current?.parentElement;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      // 只要容器高度变了，且用户之前就在底部，就强行锁死到底部
+      if (isAtBottomRef.current) {
+        chatEndRef.current?.scrollIntoView({ behavior: "instant" });
+      }
+    });
+
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []); // 仅挂载时执行一次
+
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || !activeChatId || isStreaming) return;
+
+    const userMsgText = inputText;
+    const currentId = activeChatId; // 闭包锁定
+    setInputText("");
+    setIsStreaming(true);
+    
+    // A. 插入用户消息占位
+    const newUserMsg: ChatMessage = { role: 'user', message: userMsgText, timestamp: new Date().toISOString() };
+    setChats(prev => prev.map(c => c.chat_id === currentId ? { ...c, messages: [...c.messages, newUserMsg] } : c));
+
+    isAtBottomRef.current = true;
+    requestAnimationFrame(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "instant" });
+    });
+
+    // B. 【强硬点】立即开启状态轮询，监听 Searching, Evaluating 等状态
+    startChatPolling(currentId);
+
+    let assistantContent = "";
+    const eventSource = new EventSource(`${API_ENDPOINTS.CHAT_STREAM}?chat_id=${currentId}&message=${encodeURIComponent(userMsgText)}`);
+
+    eventSource.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data);
+      if (data.status === 'processing' && data.content) {
+        assistantContent += data.content;
+        setChats(prev => prev.map(c => {
+          if (c.chat_id !== currentId) return c;
+          const lastMsg = c.messages[c.messages.length - 1];
+          if (lastMsg && lastMsg.timestamp === 'streaming') {
+            const newMessages = [...c.messages];
+            newMessages[newMessages.length - 1] = { ...lastMsg, message: assistantContent };
+            return { ...c, messages: newMessages };
+          } else {
+            return { ...c, messages: [...c.messages, { role: 'assistant', message: assistantContent, timestamp: 'streaming' }] };
+          }
+        }));
+      }
+
+      if (data.status === 'completed') {
+        eventSource.close();
+        setIsStreaming(false);
+        // 推送结束，最后再同步一次最终状态和证据
+        fullSyncChat(currentId);
+      }
+    });
+
+    eventSource.addEventListener('error', () => {
+      eventSource.close();
+      setIsStreaming(false);
+      setChatStatus('Failed');
+      stopChatPolling();
+    });
+  };
+
+  const startChatPolling = (id: string) => {
+    stopChatPolling(); // 先清理
+    chatPollingRef.current = setInterval(() => syncSingleChat(id), 1500); // 1.5s 高频轮询
+  };
+
+  const stopChatPolling = () => {
+    if (chatPollingRef.current) {
+      clearInterval(chatPollingRef.current);
+      chatPollingRef.current = null;
+    }
+  };
+
+  const fullSyncChat = async (id: string) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/v1/status/single_chat?chat_id=${id}`);
+      const result = await res.json();
+      if (result.status === "success" && result.data) {
+        const remoteDetail = result.data[id] || result.data;
+        setChats(prev => prev.map(c => 
+          c.chat_id === id ? { ...c, ...remoteDetail } : c
+        ));
+        if (id === activeChatId) setChatStatus(remoteDetail.status || 'Idle');
+      }
+    } catch (e) { console.error("Full sync failed", e); }
+  };
+
+  const syncSingleChat = useCallback( async (id: string) => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/v1/status/single_chat?chat_id=${id}`);
+      const result = await res.json();
+      
+      if (result.status === "success" && result.data) {
+        const remoteDetail = result.data[id] || result.data; 
+        
+        setChats(prev => prev.map(c => {
+          if (c.chat_id === id) {
+            return {
+              ...c,
+              status: remoteDetail.status || 'Idle',
+              evidence: remoteDetail.evidence || c.evidence,
+            };
+          }
+          return c;
+        }));
+
+        setChatStatus(prev => {
+          if (id === activeChatId) return remoteDetail.status || 'Idle';
+          return prev;
+        });
+
+        // 如果后端返回状态已经是 Idle 或 Failed，说明推理结束，停止轮询
+        if (['Idle', 'Failed', 'Completed'].includes(remoteDetail.status)) {
+          stopChatPolling();
+          fullSyncChat(id);
+        }
+      }
+    } catch (e) { console.error("Chat sync error", e); }
+  },[activeChatId]);
 
 
   return (
@@ -204,8 +429,8 @@ export default function ScaffoldingPage() {
           {/* 修改点：左侧大纲栏取消横向溢出 */}
           <aside className={`${isOutlineOpen ? 'w-80' : 'w-0'} transition-all duration-300 border-r border-dracula-comment bg-dracula-bg overflow-x-hidden overflow-y-auto custom-scrollbar`}>
             <div className="p-4 w-80 wrap-break-word"> {/* 增加强制换行 */}
-              <h3 className="text-xs font-bold text-dracula-comment uppercase mb-4 tracking-widest flex items-center gap-2 border-b border-dracula-comment/30 pb-2">
-                <Activity size={14} className="text-dracula-cyan" /> 结构化大纲
+              <h3 className="text-sm font-bold text-dracula-comment uppercase mb-4 tracking-widest flex items-center gap-2 border-b border-dracula-comment/30 pb-2">
+                <ListTree size={14} className="text-dracula-cyan" /> 结构化大纲
               </h3>
 
               {isLoadingOutline ? (
@@ -288,13 +513,15 @@ export default function ScaffoldingPage() {
                 ) : (
                   <div className="w-full h-full bg-[#525659] relative flex items-center justify-center">
                     {/* 增加 key 属性，当切换资产时彻底销毁旧 iframe */}
-                    <iframe 
-                      key={selectedAssetId} 
-                      ref={pdfRef}
-                      // view=FitH 自动横向撑满，navpanes=0 隐藏左侧缩略图栏
-                      src={`${previewData.url}#toolbar=1&navpanes=0&view=FitH`}
-                      className="w-full h-full border-none bg-white"
-                      title="PDF Preview"
+                    <PdfViewer 
+                      url={previewData.url} 
+                      page={currentPage} 
+                      bbox={currentBbox} 
+                      // 【修改点 5】绑定页码变更回调
+                      onPageChange={(newPage) => {
+                        setCurrentPage(newPage);
+                        setCurrentBbox(undefined); // 手动翻页时自动清除旧高亮
+                      }}
                     />
                   </div>
                 )}
@@ -310,18 +537,138 @@ export default function ScaffoldingPage() {
           </section>
         </div>
 
-        <aside className="w-112.5 flex flex-col bg-dracula-bg shrink-0 border-l border-dracula-comment">
-          <div className="p-4 border-b border-dracula-comment text-dracula-pink flex items-center gap-2 font-bold">
-            <MessageSquare size={18} /> 智能研讨
-          </div>
-          <div className="flex-1 p-4 font-mono text-xs text-dracula-comment leading-relaxed">
-            [SYSTEM]: 会话就绪。
-            <br/>[STATUS]: 向量数据库连接正常。
-          </div>
-          <div className="p-4 border-t border-dracula-comment">
+        <aside className="w-112.5 flex flex-col bg-dracula-bg shrink-0 border-l border-dracula-comment relative">
+          {/* 会话选择器 Header */}
+          <div className="p-3 border-b border-dracula-comment flex items-center justify-between bg-dracula-current/20">
             <div className="relative">
-              <input type="text" placeholder="Terminal > _" className="w-full bg-dracula-current p-3 rounded border border-dracula-comment focus:border-dracula-purple transition-all outline-none font-mono text-sm" />
-              <Send size={18} className="absolute right-3 top-3 text-dracula-comment" />
+              <button 
+                onClick={() => setIsChatListOpen(!isChatListOpen)}
+                className="flex items-center gap-2 text-xs font-bold text-dracula-pink hover:text-dracula-fg transition-colors"
+              >
+                <MessageSquare size={14} /> 
+                {chats.find(c => c.chat_id === activeChatId)?.chat_name || "选择研讨会话"}
+                <ChevronDown size={12} className={`transition-transform ${isChatListOpen ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {/* 下拉菜单 */}
+              {isChatListOpen && (
+                <div className="absolute top-full left-0 mt-2 w-64 bg-dracula-bg border border-dracula-comment shadow-2xl z-50 rounded-md overflow-hidden">
+                  <button 
+                    onClick={createNewChat}
+                    className="w-full p-3 text-left text-[10px] font-bold text-dracula-green border-b border-dracula-comment hover:bg-dracula-current flex items-center gap-2"
+                  >
+                    <Plus size={12} /> NEW_CONVERSATION_THREAD
+                  </button>
+                  <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                    {chats.map(chat => (
+                      <div 
+                        key={chat.chat_id}
+                        onClick={() => { setActiveChatId(chat.chat_id); setIsChatListOpen(false); }}
+                        className={`p-3 text-[11px] cursor-pointer hover:bg-dracula-current transition-colors border-b border-dracula-comment/30 ${activeChatId === chat.chat_id ? 'bg-dracula-current text-dracula-cyan' : 'text-dracula-fg'}`}
+                      >
+                        {chat.chat_name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 对话内容区 */}
+          <div 
+            className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar relative"
+            // [ADD] 滚动监听：判断用户是否在底部（预留 50px 缓冲区）
+            onScroll={(e) => {
+              const target = e.currentTarget;
+              const offset = 50; // 容差值
+              const atBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + offset;
+              isAtBottomRef.current = atBottom;
+            }}
+          >
+            {/* 浮动推理状态条：仅在非 Idle 状态时显示 */}
+            {chatStatus !== 'Idle' && chatStatus !== 'Failed' && (
+              <div className="sticky top-0 z-10 flex justify-center mb-4">
+                <div className="flex items-center gap-3 px-4 py-2 bg-dracula-purple/10 border border-dracula-purple/30 backdrop-blur-md rounded-full shadow-lg animate-in fade-in zoom-in duration-300">
+                  <div className="relative flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-dracula-purple animate-ping absolute" />
+                    <div className="w-2 h-2 rounded-full bg-dracula-purple relative" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-dracula-purple tracking-widest uppercase italic">
+                      AI_THINKING_FLOW: {chatStatus}
+                    </span>
+                    {/* 进度步进条指示 */}
+                    <div className="flex gap-1 mt-1">
+                      {['Preparing', 'Researching', 'Evaluating', 'Strengthening', 'Finalizing'].map((s) => (
+                        <div 
+                          key={s} 
+                          className={`h-1 w-6 rounded-full transition-all duration-500 ${
+                            chatStatus === s ? 'bg-dracula-purple w-10' : 'bg-dracula-comment/20'
+                          }`} 
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="flex flex-col gap-4 w-full"> 
+              {chats.find(c => c.chat_id === activeChatId)?.messages.map((msg, i) => {
+               // [FIX] 只有该会话的最后一条消息展示证据
+               const isLastMessage = i === (chats.find(c => c.chat_id === activeChatId)?.messages.length || 0) - 1;
+               const currentEvidence = chats.find(c => c.chat_id === activeChatId)?.evidence || [];
+
+               return (
+                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`max-w-[90%] p-3 rounded-lg text-sm leading-relaxed ${
+                    msg.role === 'user' 
+                    ? 'bg-dracula-purple/20 border border-dracula-purple/30 text-dracula-fg' 
+                    : 'bg-dracula-current/50 border border-dracula-comment/30 text-dracula-fg'
+                  }`}>
+                    <MarkdownRenderer content={msg.message} />
+                  </div>
+                  {/* [FIX] 仅在 AI 且非流式传输时展示证据卡片 */}
+                  {msg.role === 'assistant' && msg.timestamp !== 'streaming' && isLastMessage && currentEvidence.length > 0 && (
+                    <div className="mt-3 w-full space-y-2 animate-in fade-in slide-in-from-top-2">
+                      <div className="text-[10px] font-bold text-dracula-comment uppercase tracking-widest flex items-center gap-2 px-1">
+                        <ListTree size={10} /> Grounded Evidence
+                      </div>
+                      {currentEvidence.slice(0, 2).map((ev, ei) => (
+                        <EvidenceCard key={ei} evidence={ev} onJump={handleEvidenceJump} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            </div>
+            <div 
+              id="chat-end-ref" 
+              ref={chatEndRef} 
+              className="h-4 w-full shrink-0" 
+            />
+          </div>
+
+          {/* 输入框 */}
+          <div className="p-4 border-t border-dracula-comment bg-dracula-bg">
+            <div className="relative flex items-center gap-2 bg-dracula-current rounded-lg border border-dracula-comment p-2 focus-within:border-dracula-purple transition-all">
+              <Terminal size={14} className="text-dracula-comment shrink-0" />
+              <input 
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                disabled={isStreaming || !activeChatId}
+                placeholder={activeChatId ? "输入指令进行学术探讨..." : "请先选择或创建会话"}
+                className="w-full bg-transparent outline-none font-mono text-xs text-dracula-fg disabled:opacity-50"
+              />
+              <button 
+                onClick={handleSendMessage}
+                disabled={isStreaming || !inputText.trim()}
+                className="p-1 hover:text-dracula-pink transition-colors disabled:opacity-0"
+              >
+                <Send size={18} />
+              </button>
             </div>
           </div>
         </aside>
@@ -357,6 +704,8 @@ export default function ScaffoldingPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+          {assets.length > 0 ? (
+            // 如果有资产，显示网格列表
           <div className="grid grid-cols-2 gap-4">
             {assets.map(asset => (
               <AssetCard 
@@ -367,9 +716,20 @@ export default function ScaffoldingPage() {
               />
             ))}
           </div>
-          <div className="h-2" />
-        </div>
-      </footer>
+        ) : (
+          // 如果没有资产，显示虚线占位框
+          <div className="h-full min-h-30 border-2 border-dashed border-dracula-comment/30 rounded-xl flex flex-col items-center justify-center group hover:border-dracula-green/50 transition-colors">
+            <div className="p-3 rounded-full bg-dracula-comment/10 mb-2 group-hover:bg-dracula-green/10 transition-colors">
+              <Upload size={24} className="text-dracula-comment/40 group-hover:text-dracula-green/60" />
+            </div>
+            <p className="text-[10px] font-mono text-dracula-comment uppercase tracking-widest">
+              No assets deployed. Waiting for upload...
+            </p>
+          </div>
+        )}
+        <div className="h-2" />
+          </div>
+        </footer>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 {
-    "models-dir": "/home/liangqing/AcademicAgent-Suite/models/miner_u/models",
+    "models-dir": "YOUR_PATH_HERE/AcademicAgent-Suite/models/miner_u/models",
     "device-mode": "cuda",
-    "temp-output-dir": "/home/liangqing/AcademicAgent-Suite/storage/processed",
+    "temp-output-dir": "YOUR_PATH_HERE/AcademicAgent-Suite/storage/processed",
     "layout-config": {
         "model": "layoutlmv3"
     },
