@@ -105,4 +105,17 @@ npm install | npm run bulid | npm run start
 
 ---
 
+## 🔗 Citation
+
+*如果你在学术研究或工程项目中使用了本项目, 请考虑以下列方式引用*
+
+```bibtex
+@misc{contextmap,
+  author = {wrongtrojan},
+  title = {ContextMap: AI-powered Multimodal Structural Outline and Evidence Localization Agent},
+  year = {2026},
+  publisher = {GitHub},
+  journal = {GitHub repository},
+  howpublished = {\url{[https://github.com/wrongtrojan/ContextMap](https://github.com/wrongtrojan/ContextMap)}}
+}
 
