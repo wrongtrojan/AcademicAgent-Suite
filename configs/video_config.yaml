@@ -1,8 +1,0 @@
-slicer:
-  frame_diff_threshold: 0.03  
-  sample_rate: 2             
-  min_interval: 10          
-
-clip_alignment:
-  batch_size: 32
-  device: "cuda"
