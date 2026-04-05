@@ -1,0 +1,25 @@
+paths:
+  base_dir: "YOUR_PATH_HERE/ContextMap"
+  raw_storage: "YOUR_PATH_HERE/ContextMap/storage/raw"
+  processed_storage: "YOUR_PATH_HERE/ContextMap/storage/processed"
+
+environments:
+  doc_recognize: "YOUR_PATH_HERE/ContextMap/envs/DocRecognize/bin/python"
+  video_recognize: "YOUR_PATH_HERE/ContextMap/envs/VideoRecognize/bin/python"
+  visual_inference: "YOUR_PATH_HERE/ContextMap/envs/VisualInference/bin/python"
+  sandbox_inference: "YOUR_PATH_HERE/ContextMap/envs/SandboxInference/bin/python"
+  data_stream: "YOUR_PATH_HERE/ContextMap/envs/DataStream/bin/python"
+  agent_logic: "YOUR_PATH_HERE/ContextMap/envs/AgentLogic/bin/python"
+  
+model_paths:
+  whisper: "YOUR_PATH_HERE/ContextMap/models/whisper_v3"
+  qwen2_vl: "YOUR_PATH_HERE/ContextMap/models/qwen2_vl"
+  miner_u: "YOUR_PATH_HERE/ContextMap/models/miner_u"
+  clip: "YOUR_PATH_HERE/ContextMap/models/clip"
+  dinov2: "YOUR_PATH_HERE/ContextMap/models/dinov2/"
+  
+database:
+  milvus_host: "localhost"
+  milvus_port: "19530"
+  redis_host: "localhost"
+  redis_port: "6379"

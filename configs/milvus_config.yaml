@@ -1,0 +1,20 @@
+connection:
+  host: "localhost"
+  port: "19530"
+
+collection:
+  name: "academic_multimodal_assets"
+  dim: 768
+  metric_type: "IP"
+  index_type: "IVF_FLAT"
+  nlist: 128
+
+schema:
+  pk: "id"
+  asset_name: "asset_name"     
+  modality: "modality"         
+  content_type: "content_type" 
+  content_ref: "content_ref"   
+  timestamp: "timestamp"       
+  coordinates: "coordinates"
+  vec: "vector"
