@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY shared /app/shared
+COPY core /app/core
+COPY gateway /app/gateway
+COPY compiler /app/compiler
+COPY docs /app/docs
+COPY services /app/services
+
+ENV PYTHONPATH=/app
+
+EXPOSE 8000
+# Access lines come from HttpRequestLoggingMiddleware; avoid duplicate uvicorn access logs.
+CMD ["uvicorn", "gateway.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

@@ -1,0 +1,258 @@
+# Stack definition (repo root). GPU: merge deploy/docker-compose.gpu.yml (+ optional deploy/docker-compose.gpu-bge.yml).
+#   make demo | make demo-gpu | make demo-gpu-bge
+#   docker compose --env-file .env up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: contextmap
+      POSTGRES_PASSWORD: contextmap
+      POSTGRES_DB: contextmap
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contextmap -d contextmap"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Web UI：浏览 Postgres 表与执行查询（开发用）。http://localhost:8088
+  pgweb:
+    image: sosedoff/pg-web:latest
+    ports:
+      - "8088:8081"
+    environment:
+      DATABASE_URL: postgres://contextmap:contextmap@postgres:5432/contextmap?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.gateway
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/storage
+      PUBLIC_BASE_URL: http://localhost:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).read()",
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 6
+      start_period: 25s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  service_manager:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service_manager
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      SERVICE_MANAGER_CONSUMER: sm-1
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  pdf_recognition:
+    build:
+      context: .
+      dockerfile: services/pdf_recognition/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/storage
+      PUBLIC_BASE_URL: http://gateway:8000
+      GATEWAY_INTERNAL_ORIGIN: http://gateway:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  data_embedding:
+    build:
+      context: .
+      dockerfile: services/data_embedding/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/storage
+      PUBLIC_BASE_URL: http://gateway:8000
+      GATEWAY_INTERNAL_ORIGIN: http://gateway:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  data_ingesting:
+    build:
+      context: .
+      dockerfile: services/data_ingesting/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/storage
+      PUBLIC_BASE_URL: http://gateway:8000
+      GATEWAY_INTERNAL_ORIGIN: http://gateway:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  video_recognition:
+    build:
+      context: .
+      dockerfile: services/video_recognition/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ROOT: /data/storage
+      PUBLIC_BASE_URL: http://gateway:8000
+      GATEWAY_INTERNAL_ORIGIN: http://gateway:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+
+  mixture_searching:
+    build:
+      context: .
+      dockerfile: services/mixture_searching/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - ./logs:/var/log/contextmap
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  llm_calling:
+    build:
+      context: .
+      dockerfile: services/llm_calling/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://contextmap:contextmap@postgres:5432/contextmap
+      REDIS_URL: redis://redis:6379/0
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  sandbox_inference:
+    build:
+      context: .
+      dockerfile: services/sandbox_inference/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  visual_inference:
+    build:
+      context: .
+      dockerfile: services/visual_inference/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_INTERNAL_ORIGIN: http://gateway:8000
+      LOG_DIR: /var/log/contextmap
+    volumes:
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  minio_data:
+  storage_data:

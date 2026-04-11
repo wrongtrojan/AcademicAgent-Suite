@@ -1,0 +1,5 @@
+transformers>=4.46.0
+accelerate>=0.34.0
+qwen-vl-utils>=0.0.8
+Pillow>=10.0
+httpx>=0.27.0

@@ -1,0 +1,26 @@
+# GPU PDF worker: PyTorch CUDA runtime + MinerU-related deps.
+# Build: docker compose -f docker-compose.yml -f deploy/docker-compose.gpu.yml build pdf_recognition
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    libglib2.0-0 \
+    libgl1 \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY deploy/images/pdf_recognition/requirements-gpu.txt /app/requirements-gpu.txt
+RUN pip install --no-cache-dir -r /app/requirements-gpu.txt
+
+COPY shared /app/shared
+COPY services/pdf_recognition /app/services/pdf_recognition
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "/app/services/pdf_recognition/worker/main.py"]

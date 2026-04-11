@@ -1,0 +1,21 @@
+# GPU visual worker: PyTorch CUDA + Qwen2-VL (weights from HF cache volume).
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY deploy/images/visual_inference/requirements-gpu.txt /app/requirements-gpu.txt
+RUN pip install --no-cache-dir -r /app/requirements-gpu.txt
+
+COPY shared /app/shared
+COPY services/visual_inference /app/services/visual_inference
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "/app/services/visual_inference/worker/main.py"]

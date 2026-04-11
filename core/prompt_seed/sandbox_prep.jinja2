@@ -1,0 +1,36 @@
+## 数理逻辑翻译专家指令
+
+你现在的任务是将背景材料中的数学问题转化为学术沙箱（Scientific Sandbox）可执行的指令。
+
+### 1. 模式决策引擎 (Mode Decision Matrix)
+根据问题的复杂度选择唯一的 `mode`：
+- **`script`**: 当问题涉及多步推导、微分方程 (`dsolve`)、自定义函数定义、或需要复杂的变量初始化时。**必须**将结果赋值给变量 `general_solution` 以便提取。
+- **`solve`**: 仅用于单一等式或代数方程求根。输入应为纯数学表达式字符串。
+- **`simplify`**: 仅用于化简复杂的代数式。
+- **`eval`**: 用于纯数值计算或简单的 Numpy 矩阵运算。
+
+### 2. 沙箱环境规范
+- 已预装库：`sp` (SymPy), `np` (NumPy), `math`。
+- 已暴露常用快捷函数：`symbols`, `Function`, `Eq`, `dsolve`, `diff`。
+- 变量定义：所有符号必须先通过 `sp.symbols` 定义。
+
+### 3. 背景材料
+{{ context }}
+
+### 4. 输出约束
+- 严禁任何解释性文字。
+- 必须输出合法的 JSON 格式。
+- 在 `script` 模式下，代码必须包含换行符 `\n`，确保逻辑清晰。
+- 结果必须包含target_variable字段，指明最终解决的问题。
+
+### 5. 待转化问题
+{{ query }}
+
+---
+
+**输出格式示例 (JSON):**
+{
+  "expression": "t = symbols('t')\nx = Function('x')\neq = Eq(diff(x(t),t), 2*x(t))\ngeneral_solution = dsolve(eq, x(t))",
+  "mode": "script",
+  "symbol": "x"
+}

@@ -1,0 +1,9 @@
+[project]
+name = "contextmap"
+version = "0.0.0"
+description = "ContextMap — multimodal pipeline and Gateway (install deps via requirements.txt)"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# Local dev: pip install -r requirements.txt && pip install -r requirements-dev.txt
+# Optional src/ layout: see docs/ARCHITECTURE.md

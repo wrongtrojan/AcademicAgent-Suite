@@ -1,0 +1,40 @@
+# Optional third overlay: BGE embeddings on GPU for data_embedding.
+# Use with base + GPU stack so named volumes exist:
+#   make demo-gpu-bge
+#   # or: docker compose -f docker-compose.yml -f deploy/docker-compose.gpu.yml -f deploy/docker-compose.gpu-bge.yml --env-file .env up -d
+#
+# For mixture_searching semantic quality, run BGE here and keep EMBEDDING_BACKEND=bge across workers.
+
+services:
+  data_embedding:
+    build:
+      context: .
+      dockerfile: deploy/images/data_embedding/Dockerfile.gpu
+    environment:
+      EMBEDDING_BACKEND: bge
+      EMBEDDING_DEVICE: cuda
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf/hub
+      TORCH_HOME: /models/torch
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    volumes:
+      - hf_model_cache:/models/hf
+      - torch_model_cache:/models/torch
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  service_manager:
+    environment:
+      # Single-GPU hosts: avoid parallel BGE jobs competing with PDF/VLM
+      CONTEXTMAP_LIMIT_DATA_EMBEDDING: ${CONTEXTMAP_LIMIT_DATA_EMBEDDING:-1}
+
+volumes:
+  hf_model_cache:
+  torch_model_cache:

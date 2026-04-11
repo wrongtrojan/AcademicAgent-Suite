@@ -1,0 +1,101 @@
+# GPU stack overlay — use with:
+#   make demo-gpu
+#   # or: docker compose -f docker-compose.yml -f deploy/docker-compose.gpu.yml up -d
+# Requires: NVIDIA driver + nvidia-container-toolkit on the host.
+#
+# Model weights land in named volumes (survive image rebuilds). Tune per-service
+# concurrency via CONTEXTMAP_LIMIT_* on service_manager (see docs/MODELS_AND_GPU.md).
+
+services:
+  pdf_recognition:
+    build:
+      context: .
+      dockerfile: deploy/images/pdf_recognition/Dockerfile.gpu
+    environment:
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf/hub
+      TORCH_HOME: /models/torch
+      MINERU_MODE: ${MINERU_MODE:-auto}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    volumes:
+      - hf_model_cache:/models/hf
+      - torch_model_cache:/models/torch
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  video_recognition:
+    build:
+      context: .
+      dockerfile: deploy/images/video_recognition/Dockerfile.gpu
+    environment:
+      HF_HOME: /models/hf
+      WHISPER_CACHE: /models/whisper
+      VIDEO_WHISPER: ${VIDEO_WHISPER:-1}
+      WHISPER_BACKEND: ${WHISPER_BACKEND:-auto}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cuda}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-float16}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    volumes:
+      - hf_model_cache:/models/hf
+      - whisper_cache:/models/whisper
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  visual_inference:
+    build:
+      context: .
+      dockerfile: deploy/images/visual_inference/Dockerfile.gpu
+    environment:
+      HF_HOME: /models/hf
+      TRANSFORMERS_CACHE: /models/hf/hub
+      TORCH_HOME: /models/torch
+      VISUAL_BACKEND: ${VISUAL_BACKEND:-local}
+      QWEN_VL_MODEL_ID: ${QWEN_VL_MODEL_ID:-Qwen/Qwen2-VL-2B-Instruct}
+      QWEN_VL_TORCH_DTYPE: ${QWEN_VL_TORCH_DTYPE:-bfloat16}
+      VISUAL_MAX_PIXELS: ${VISUAL_MAX_PIXELS:-802816}
+      VISUAL_MAX_NEW_TOKENS: ${VISUAL_MAX_NEW_TOKENS:-256}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    volumes:
+      - hf_model_cache:/models/hf
+      - torch_model_cache:/models/torch
+      - storage_data:/data/storage
+      - ./logs:/var/log/contextmap
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  service_manager:
+    environment:
+      CONTEXTMAP_LIMIT_PDF_RECOGNITION: ${CONTEXTMAP_LIMIT_PDF_RECOGNITION:-1}
+      CONTEXTMAP_LIMIT_VIDEO_RECOGNITION: ${CONTEXTMAP_LIMIT_VIDEO_RECOGNITION:-1}
+      CONTEXTMAP_LIMIT_DATA_EMBEDDING: ${CONTEXTMAP_LIMIT_DATA_EMBEDDING:-2}
+      CONTEXTMAP_LIMIT_VISUAL_INFERENCE: ${CONTEXTMAP_LIMIT_VISUAL_INFERENCE:-1}
+
+volumes:
+  hf_model_cache:
+  torch_model_cache:
+  whisper_cache:

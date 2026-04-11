@@ -1,0 +1,8 @@
+# Optional: aggregate of heavy worker GPU extras (NOT for gateway — use requirements.txt there).
+# Install only when developing or debugging ML workers on the host; production uses Dockerfiles.
+#
+# Union of per-service pins (may overlap; pip deduplicates):
+-r deploy/images/pdf_recognition/requirements-gpu.txt
+-r deploy/images/video_recognition/requirements-gpu.txt
+-r deploy/images/visual_inference/requirements-gpu.txt
+-r deploy/images/data_embedding/requirements-gpu.txt

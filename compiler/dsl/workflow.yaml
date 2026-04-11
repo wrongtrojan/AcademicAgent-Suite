@@ -1,0 +1,18 @@
+# Declarative LangGraph workflow (compiled by compiler.translator)
+name: chat_turn
+entry: retrieve
+nodes:
+  retrieve:
+    kind: retrieval
+    description: Hybrid search over asset chunks
+  post_retrieve_hooks:
+    kind: hooks
+    description: Optional sandbox / visual enrichment (see gateway.chat_hooks)
+  synthesize:
+    kind: llm
+    description: Render prompt + call LLM
+edges:
+  - from: retrieve
+    to: post_retrieve_hooks
+  - from: post_retrieve_hooks
+    to: synthesize

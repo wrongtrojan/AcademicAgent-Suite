@@ -33,42 +33,46 @@
 
 ---
 
-## 💻 Quickstart
+## Quickstart（三条命令跑通后端 + 前端）
+
+后端入口为 **FastAPI** [`gateway/app.py`](gateway/app.py)。编排入口为仓库根目录 [`docker-compose.yml`](docker-compose.yml)（GPU/BGE 叠加见 [`deploy/`](deploy/)），推荐用 Makefile。各目录职责见 **[`docs/CODEMAP.zh.md`](docs/CODEMAP.zh.md)**。
 
 ```bash
-# Ubuntu 系统环境
-# 拉取项目
-git clone git@github.com:wrongtrojan/ContextMap.git
-# 或者 git clone https://github.com/wrongtrojan/ContextMap.git
-
+git clone https://github.com/wrongtrojan/ContextMap.git
 cd ContextMap
 
-# 部署容器
-sudo bash deploy/installer.sh
-sudo docker compose -f deploy/docker-compose.yml up -d
+cp .env.example .env    # 唯一完整环境模板；按需改密钥与 URL
 
-# 下载模型权重
-bash models/downloader.sh
-
-# 下载后端环境
-pip install huggingface_hub
-python envs/downloader.py
-
-# 校准配置
-python configs/calibrator.py
-
-# 填写api
-nano .env
-
-# 启动后端
-source envs/AgentLogic/bin/activate
-uvicorn web.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 启动前端(新bash内)
-cd Context/web/frontend
-npm install | npm run bulid | npm run start
-
+make demo               # 启动完整 CPU 栈（Postgres、Redis、MinIO、Gateway、service_manager、全部 workers）
+make dev-frontend       # 另开终端：Next.js，默认连 http://localhost:8000
 ```
+
+默认 API：`http://localhost:8000`（与 [`frontend/lib/api-config.ts`](frontend/lib/api-config.ts) 中 `BASE_URL` 一致）。
+
+本地开发（不用 Compose 里的 gateway）可先起 `postgres` / `redis`，再：`export PYTHONPATH=$(pwd)`，`uvicorn gateway.app:app --host 0.0.0.0 --port 8000 --no-access-log --reload`（访问日志由应用内中间件统一输出，勿与 uvicorn access 重复）。`LOG_LEVEL`、`LOG_DIR`、`CONTEXTMAP_LOG_HTTP_SKIP_PREFIXES` 见 `.env.example`。Compose 启动后：**Pgweb** 浏览数据库 `http://localhost:8088`；落盘日志在仓库 `./logs/*.log`（`tail -f`）。`make db-psql` 进入 `psql`。Python 依赖：`pip install -r requirements.txt`。自检：`make test`（编译 + 导入 Gateway）。
+
+<details>
+<summary>进阶：GPU / BGE、验证脚本、迁移</summary>
+
+| | CPU（默认） | Full GPU (NVIDIA) | + BGE 向量 GPU（可选） |
+|---|-------------|-------------------|------------------------|
+| 一键 | `make demo` | `make demo-gpu` | `make demo-gpu-bge` |
+| 等价 compose | `docker compose --env-file .env up -d` | `-f docker-compose.yml -f deploy/docker-compose.gpu.yml` | 再叠加 `-f deploy/docker-compose.gpu-bge.yml` |
+| 说明 | slim worker 镜像 | MinerU / Whisper / Qwen-VL 等 | `data_embedding` BGE + CUDA，利于与 `mixture_searching` 语义一致 |
+
+- 验证：`make verify-e2e`（上传 fixture PDF 并等到 Ready）、`make verify-e2e-gpu` / `make verify-e2e-gpu-bge`
+- 文档：[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)、[`docs/MODELS_AND_GPU.md`](docs/MODELS_AND_GPU.md)、[`deploy/images/README.md`](deploy/images/README.md)
+- 重型依赖汇总（仅 worker 镜像/本机调试）：[`requirements-ml-gpu.txt`](requirements-ml-gpu.txt)
+
+</details>
+
+<details>
+<summary>旧版单体部署（<code>envs/AgentLogic</code>、<code>web.main</code>）已弃用</summary>
+
+若你仍使用旧分支上的 `installer.sh`、`models/downloader.sh`、`uvicorn web.main:app`，请切换到对应 Git 分支；当前默认开发流以上述 Gateway + Compose 为准。
+
+</details>
+
 ---
 
 ## 🛠️ Features

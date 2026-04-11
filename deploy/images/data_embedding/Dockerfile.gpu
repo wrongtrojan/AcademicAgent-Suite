@@ -1,0 +1,19 @@
+# GPU data_embedding worker: BGE via sentence-transformers on CUDA.
+# Build: docker compose -f docker-compose.yml -f deploy/docker-compose.gpu.yml -f deploy/docker-compose.gpu-bge.yml build data_embedding
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY deploy/images/data_embedding/requirements-gpu.txt /app/requirements-gpu.txt
+RUN pip install --no-cache-dir -r /app/requirements-gpu.txt
+
+COPY shared /app/shared
+COPY services/data_embedding /app/services/data_embedding
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "/app/services/data_embedding/worker/main.py"]

@@ -1,0 +1,6 @@
+# Extra deps for GPU PDF worker (MinerU / layout). Base torch comes from PyTorch CUDA image.
+# Fallback: pip install magic-pdf[full]
+opencv-python-headless>=4.8.0
+Pillow>=10.0
+numpy>=1.26.0
+mineru>=2.0.0

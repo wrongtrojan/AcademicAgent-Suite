@@ -1,0 +1,2 @@
+# sentence-transformers uses PyTorch from the CUDA base image.
+sentence-transformers>=2.2.0

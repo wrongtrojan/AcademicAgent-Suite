@@ -1,0 +1,3 @@
+# Docker: build context is the repository root; Dockerfile copies root requirements.txt.
+# Local: pip install -r ../../requirements.txt
+-r ../../requirements.txt

@@ -1,0 +1,21 @@
+# GPU video worker: FFmpeg + faster-whisper (CTranslate2).
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY deploy/images/video_recognition/requirements-gpu.txt /app/requirements-gpu.txt
+RUN pip install --no-cache-dir -r /app/requirements-gpu.txt
+
+COPY shared /app/shared
+COPY services/video_recognition /app/services/video_recognition
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "/app/services/video_recognition/worker/main.py"]

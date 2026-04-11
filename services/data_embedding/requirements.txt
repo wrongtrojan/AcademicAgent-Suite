@@ -1,0 +1,2 @@
+# See repository root requirements.txt (Docker build context: ..).
+-r ../../requirements.txt
